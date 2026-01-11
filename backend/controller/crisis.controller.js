@@ -19,7 +19,7 @@ export const commanderChat = async (req, res) => {
         const activeIncidents = await Incident.find({ status: 'Open' });
 
         // 2. Feed context to Gemini
-        const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+        const model = genAI.getGenerativeModel({ model: "gemini-3-flash" });
         const prompt = `
             Act as a Crisis Response Commander. 
             Here is the live data:

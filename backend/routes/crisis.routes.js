@@ -1,9 +1,9 @@
 import express from "express";
 import { commanderChat, reportIncident } from "../controller/crisis.controller.js";
 
-const router = express.Router();
+const CrisisRouter = express.Router();
 
-router.post("/chat", commanderChat);       // The Chatbot Endpoint
-router.post("/report", reportIncident);    // The Incident Reporting Endpoint
+CrisisRouter.post("/chat", commanderChat);       // The Chatbot Endpoint
+CrisisRouter.post("/report", reportIncident);    // The Incident Reporting Endpoint
 
-export default router;
+export default CrisisRouter;
