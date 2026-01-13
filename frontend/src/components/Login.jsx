@@ -34,7 +34,7 @@ export default function Login() {
       );
       dispatch(setUserData(res.data.user));
       toast.success("Login Successful");
-      navigate("/");
+      
     } catch (err) {
       toast.error("Login Failed");
       setError(err.response?.data?.message || "Login failed");

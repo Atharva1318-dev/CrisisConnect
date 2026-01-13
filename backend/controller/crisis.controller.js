@@ -48,7 +48,7 @@ export const commanderChat = async (req, res) => {
 //  Alert System Implementation
 export const reportIncident = async (req, res) => {
   try {
-    const { type, description, severity, latitude, longitude, userId } =
+    const { type, description, severity, latitude, longitude } =
       req.body;
 
     const newIncident = new Incident({
@@ -56,7 +56,7 @@ export const reportIncident = async (req, res) => {
       description,
       severity,
       location: { type: "Point", coordinates: [longitude, latitude] },
-      reportedBy: userId,
+      reportedBy: req.userId,
     });
 
     await newIncident.save();
