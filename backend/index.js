@@ -4,7 +4,7 @@ import ConnectDB from "./Db/Db.js";
 import AuthRouter from "./routes/auth.routes.js";
 import cors from "cors";
 import UserRouter from "./routes/user.routes.js";
-import CrisisRouter from "./routes/crisis.routes.js";
+import IncidentRouter from "./routes/incident.routes.js";
 import cookieParser from "cookie-parser";
 import NewsRouter from "./routes/new.routes.js";
 dotenv.config();
@@ -25,7 +25,7 @@ app.use(cors({
 app.use("/api/auth", AuthRouter);
 app.use("/api/user", UserRouter);
 app.use("/api/news", NewsRouter);
-app.use("/api/crisis", CrisisRouter);
+app.use("/api/incident", IncidentRouter);
 
 
 
