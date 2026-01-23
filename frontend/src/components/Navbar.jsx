@@ -1,5 +1,5 @@
 "use client";
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useSelector } from "react-redux";
 import clsx from "clsx";
@@ -17,6 +17,24 @@ const Navbar = () => {
   const [isOpen, setIsOpen] = useState(false);
   const { userData } = useSelector((state) => state.user);
   const location = useLocation();
+  const [showNavbar, setShowNavbar] = useState(true);
+  const [lastScrollY, setLastScrollY] = useState(0);
+
+  useEffect(() => {
+  const handleScroll = () => {
+    if (window.scrollY > lastScrollY && window.scrollY > 80) {
+      setShowNavbar(false); // scrolling down
+    } else {
+      setShowNavbar(true); // scrolling up
+    }
+    setLastScrollY(window.scrollY);
+  };
+
+  window.addEventListener("scroll", handleScroll);
+  return () => window.removeEventListener("scroll", handleScroll);
+}, [lastScrollY]);
+
+
 
   // --- Dynamic nav links per role ---
   let navLinks = [];
@@ -55,11 +73,14 @@ const Navbar = () => {
     <>
       {/* Main Navbar */}
       <nav
-        className={clsx(
-          "fixed z-50 w-[95%] top-4 rounded-2xl -translate-x-1/2 left-1/2 border border-white/10 bg-black/50 backdrop-blur-xl",
-          "md:top-4 md:left-1/2 md:w-[85%] lg:w-[75%] md:-translate-x-1/2 lg:rounded-full"
-        )}
-      >
+  className={clsx(
+    "fixed z-50 w-[95%] top-4 rounded-2xl -translate-x-1/2 left-1/2 border border-white/10 bg-black/50 backdrop-blur-xl",
+    "md:top-4 md:left-1/2 md:w-[85%] lg:w-[75%] md:-translate-x-1/2 lg:rounded-full",
+    "transition-transform duration-300 ease-in-out",
+    showNavbar ? "translate-y-0" : "-translate-y-[120%]"
+  )}
+>
+
         <div className="flex h-16 items-center justify-between px-4 md:px-6">
           {/* Logo */}
           <Link to="/" className="flex items-center gap-2 group">

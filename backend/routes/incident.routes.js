@@ -1,6 +1,7 @@
 import express from "express";
 import isAuth from "../middleware/auth.middleware.js";
 import upload from "../middleware/multer.middleware.js";
+import { dispatchIncident } from "../controller/incident.controller.js";
 import {
   createIncident,
   getIncidents,
@@ -25,6 +26,8 @@ IncidentRouter.get("/list", getIncidents);
 
 // Nearby
 IncidentRouter.get("/nearby/:lat/:lon", getNearbyIncidents);
+
+IncidentRouter.post("/:incidentId/dispatch", isAuth, dispatchIncident);
 
 // Single incident
 IncidentRouter.get("/:incidentId", getIncidentById);

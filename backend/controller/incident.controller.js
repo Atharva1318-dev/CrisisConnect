@@ -441,3 +441,48 @@ export const getIncidentStats = async (req, res) => {
     return res.status(500).json({ message: "Internal server error" });
   }
 };
+
+export const dispatchIncident = async (req, res) => {
+  try {
+    const { incidentId } = req.params;
+    const { resources } = req.body;
+    // resources = [{ resourceId, quantity }]
+
+    const incident = await Incident.findById(incidentId);
+    if (!incident) {
+      return res.status(404).json({ message: "Incident not found" });
+    }
+
+    if (incident.status !== "Pending") {
+      return res.status(400).json({ message: "Incident already handled" });
+    }
+
+    const dispatchedResourceIds = [];
+
+    for (const r of resources) {
+      const resource = await Resource.findById(r.resourceId);
+
+      if (!resource) continue;
+
+      resource.status = "Reserved";
+      resource.current_incident = incidentId;
+      resource.quantity = r.quantity; // editable quantity
+      await resource.save();
+
+      dispatchedResourceIds.push(resource._id);
+    }
+
+    incident.status = "Active";
+    incident.dispatchedResources = dispatchedResourceIds;
+    incident.respondedBy = req.userId;
+    await incident.save();
+
+    return res.status(200).json({
+      message: "Resources dispatched successfully",
+      incident,
+    });
+  } catch (error) {
+    console.error("Dispatch Incident Error:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};

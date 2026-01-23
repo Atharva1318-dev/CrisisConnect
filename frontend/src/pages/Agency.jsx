@@ -3,17 +3,27 @@ import axios from "axios";
 
 // 🔥 CORRECT BACKEND PORT
 const API = "http://localhost:8901/api/incident";
+const RESOURCE_API = "http://localhost:8901/api/resource";
+
 
 const Agency = () => {
   const [incidents, setIncidents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedIncident, setSelectedIncident] = useState(null);
+  const [showDispatchModal, setShowDispatchModal] = useState(false);
+  const [dispatchResources, setDispatchResources] = useState([]);
+  const severityPreset = {
+    Low: 1,
+    Medium: 3,
+    High: 5,
+    Critical: 8,
+  };
 
   const fetchIncidents = async () => {
     try {
       setLoading(true);
       const res = await axios.get(`${API}/list`);
-      
+
       console.log("RAW INCIDENTS:", res.data.incidents);
 
       const pending = res.data.incidents
@@ -53,8 +63,48 @@ const Agency = () => {
     fetchIncidents();
   };
 
+  const handleDispatch = async () => {
+  try {
+    console.log("DISPATCHING RESOURCES:", dispatchResources);
+
+    for (const resource of dispatchResources) {
+      await axios.post(
+        `${RESOURCE_API}/create`,
+        {
+          item_name: resource.item_name,
+          category: resource.category,
+          quantity: resource.quantity,
+
+          // 🔴 REQUIRED BY BACKEND
+          latitude: selectedIncident.location.coordinates[1],
+          longitude: selectedIncident.location.coordinates[0],
+
+          status: "Reserved",
+        },
+        { withCredentials: true }
+      );
+    }
+
+    // Mark incident as Active
+    await axios.patch(
+      `${API}/${selectedIncident._id}/status`,
+      { status: "Active" },
+      { withCredentials: true }
+    );
+
+    alert("Resources dispatched successfully 🚑");
+
+    setShowDispatchModal(false);
+    fetchIncidents();
+  } catch (err) {
+    console.error("Dispatch failed:", err);
+    alert("Dispatch failed. Check console.");
+  }
+};
+
+
   const getSeverityColor = (severity) => {
-    switch(severity?.toLowerCase()) {
+    switch (severity?.toLowerCase()) {
       case 'critical': return 'bg-red-100 text-red-800 border-red-200';
       case 'high': return 'bg-orange-100 text-orange-800 border-orange-200';
       case 'medium': return 'bg-yellow-100 text-yellow-800 border-yellow-200';
@@ -64,7 +114,7 @@ const Agency = () => {
   };
 
   const getTypeIcon = (type) => {
-    switch(type?.toLowerCase()) {
+    switch (type?.toLowerCase()) {
       case 'fire': return '🔥';
       case 'medical': return '🚑';
       case 'police': return '🚨';
@@ -74,8 +124,20 @@ const Agency = () => {
     }
   };
 
+  const getModeIcon = (mode) => {
+    switch (mode) {
+      case "VOICE":
+        return "🎤";
+      case "IMAGE_TEXT":
+        return "📷";
+      default:
+        return "📄";
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
+    <div className="min-h-screen pt-16 bg-gradient-to-br from-gray-50 to-gray-100">
+
       {/* Outer container with proper spacing */}
       <div className="min-h-screen flex flex-col">
         {/* Header - Not fixed, but with proper spacing */}
@@ -92,11 +154,7 @@ const Agency = () => {
                 <p className="text-gray-600 text-sm mt-1">Monitor and manage incoming emergency incidents</p>
               </div>
               <div className="flex items-center gap-4">
-                <div className="bg-white px-4 py-2 rounded-lg shadow-sm border border-gray-200">
-                  <div className="text-xs text-gray-500">Pending</div>
-                  <div className="text-xl font-bold text-gray-900">{incidents.length}</div>
-                </div>
-                <button 
+                <button
                   onClick={fetchIncidents}
                   className="flex items-center gap-2 px-4 py-2 bg-white hover:bg-gray-50 text-gray-700 rounded-lg border border-gray-200 shadow-sm transition-colors text-sm"
                 >
@@ -148,11 +206,10 @@ const Agency = () => {
                         <div
                           key={incident._id}
                           onClick={() => setSelectedIncident(incident)}
-                          className={`bg-white rounded-2xl border-2 p-5 cursor-pointer transition-all hover:shadow-lg ${
-                            selectedIncident?._id === incident._id 
-                              ? 'border-blue-500 bg-blue-50' 
-                              : 'border-gray-200 hover:border-gray-300'
-                          }`}
+                          className={`bg-white rounded-2xl border-2 p-5 cursor-pointer transition-all hover:shadow-lg ${selectedIncident?._id === incident._id
+                            ? 'border-blue-500 bg-blue-50'
+                            : 'border-gray-200 hover:border-gray-300'
+                            }`}
                         >
                           <div className="flex items-start justify-between mb-4">
                             <div className="flex items-center gap-4">
@@ -166,7 +223,11 @@ const Agency = () => {
                                     {incident.severity}
                                   </span>
                                   <span className="text-sm text-gray-500">•</span>
-                                  <span className="text-sm text-gray-500 capitalize">{incident.mode.toLowerCase()}</span>
+                                  <span className="text-sm text-gray-500 flex items-center gap-1">
+                                    <span>{getModeIcon(incident.mode)}</span>
+                                    <span>{incident.mode === "IMAGE_TEXT" ? "Image Report" : "Voice Report"}</span>
+                                  </span>
+
                                 </div>
                               </div>
                             </div>
@@ -188,9 +249,9 @@ const Agency = () => {
                           <div className="flex items-center justify-between mt-6">
                             <div className="flex items-center gap-3">
                               <span className="text-sm text-gray-500">
-                                {new Date(incident.createdAt).toLocaleTimeString([], { 
-                                  hour: '2-digit', 
-                                  minute: '2-digit' 
+                                {new Date(incident.createdAt).toLocaleTimeString([], {
+                                  hour: '2-digit',
+                                  minute: '2-digit'
                                 })}
                               </span>
                               <span className="w-3 h-3 bg-green-500 rounded-full"></span>
@@ -339,18 +400,34 @@ const Agency = () => {
                       <div className="space-y-4">
                         <div>
                           <label className="text-sm font-medium text-gray-500 mb-2 block">Incident Details</label>
-                          <div className="p-4 bg-gray-50 rounded-xl">
+                          <div className="p-4 bg-gray-50 rounded-xl space-y-3">
                             <div className="flex items-center gap-4">
                               <div className={`p-3 rounded-lg ${getSeverityColor(selectedIncident.severity)}`}>
                                 <span className="text-3xl">{getTypeIcon(selectedIncident.type)}</span>
                               </div>
                               <div>
                                 <p className="text-xl font-bold text-gray-900">{selectedIncident.type}</p>
-                                <p className="text-gray-600">{selectedIncident.mode} Report</p>
+                                <p className="text-gray-600 flex items-center gap-1">
+                                  <span>{getModeIcon(selectedIncident.mode)}</span>
+                                  <span>
+                                    {selectedIncident.mode === "IMAGE_TEXT" ? "Image Report" : "Voice Report"}
+                                  </span>
+                                </p>
                               </div>
                             </div>
+
+                            {/* ✅ ADD DESCRIPTION ONLY FOR IMAGE REPORT */}
+                            {selectedIncident.mode === "IMAGE_TEXT" && selectedIncident.description && (
+                              <div className="mt-3 p-3 bg-white rounded-lg border border-gray-200">
+                                <p className="text-sm text-gray-700">
+                                  <span className="font-semibold text-gray-600">Description: </span>
+                                  {selectedIncident.description}
+                                </p>
+                              </div>
+                            )}
                           </div>
                         </div>
+
 
                         {selectedIncident.mode === "VOICE" && selectedIncident.transcript && (
                           <div>
@@ -414,7 +491,25 @@ const Agency = () => {
                         Mark as Spam
                       </button>
                       <button
-                        onClick={() => acceptIncident(selectedIncident._id)}
+                        onClick={() => {
+                          const qty = severityPreset[selectedIncident.severity] || 2;
+
+                          setDispatchResources([
+                            {
+                              item_name: "Medical Kit",
+                              category: "Medical",
+                              quantity: qty,
+                            },
+                            {
+                              item_name: "Rescue Team",
+                              category: "Rescue",
+                              quantity: qty,
+                            },
+                          ]);
+
+                          setShowDispatchModal(true);
+                        }}
+
                         className="px-6 py-3 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white text-base font-medium rounded-xl transition-all flex items-center gap-2 shadow-lg"
                       >
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -464,9 +559,74 @@ const Agency = () => {
             </div>
           </div>
         </footer>
+        {/* 🔴 DISPATCH MODAL – PASTE HERE */}
+        {showDispatchModal && (
+          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+            <div className="bg-white w-[400px] rounded-xl p-6 shadow-xl">
+              <h2 className="text-xl font-bold mb-4">
+                🚑 Deploy Resources
+              </h2>
+
+              <div className="space-y-4 mb-6">
+                {dispatchResources.map((res, index) => (
+                  <div
+                    key={index}
+                    className="grid grid-cols-3 gap-3 items-center"
+                  >
+                    <input
+                      type="text"
+                      value={res.item_name}
+                      readOnly
+                      className="border rounded-lg px-3 py-2 bg-gray-100 text-sm"
+                    />
+
+                    <input
+                      type="text"
+                      value={res.category}
+                      readOnly
+                      className="border rounded-lg px-3 py-2 bg-gray-100 text-sm"
+                    />
+
+                    <input
+                      type="number"
+                      value={res.quantity}
+                      onChange={(e) => {
+                        const updated = [...dispatchResources];
+                        updated[index].quantity = Number(e.target.value);
+                        setDispatchResources(updated);
+                      }}
+                      className="border rounded-lg px-3 py-2 text-sm"
+                    />
+                  </div>
+                ))}
+              </div>
+
+
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={() => setShowDispatchModal(false)}
+                  className="px-4 py-2 border rounded-lg"
+                >
+                  Cancel
+                </button>
+
+                <button
+  onClick={handleDispatch}
+  className="px-4 py-2 bg-green-600 text-white rounded-lg"
+>
+  Dispatch
+</button>
+
+
+              </div>
+            </div>
+          </div>
+        )}
+
       </div>
     </div>
   );
 };
+
 
 export default Agency;
