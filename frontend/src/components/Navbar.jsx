@@ -56,9 +56,9 @@ const Navbar = () => {
   } else if (userData.role === "agency") {
     navLinks = [
       { name: "Dashboard", href: "/agencyhome", icon: <IoHomeOutline size={20} /> },
-      { name: "Requests", href: "/agency/requests", icon: <IoListOutline size={20} /> },
-      { name: "Resources", href: "/agency/resources", icon: <IoPeopleOutline size={20} /> },
-      { name: "Teams", href: "/agency/teams", icon: <IoPeopleOutline size={20} /> },
+      // { name: "Requests", href: "/agency/requests", icon: <IoListOutline size={20} /> },
+      { name: "Analytics", href: "/agency/resources", icon: <IoPeopleOutline size={20} /> },
+      // { name: "Teams", href: "/agency/teams", icon: <IoPeopleOutline size={20} /> },
     ];
   } else if (userData.role === "coordinator") {
     navLinks = [

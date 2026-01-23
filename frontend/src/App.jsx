@@ -17,6 +17,8 @@ import "react-toastify/dist/ReactToastify.css";
 import { useNavigate } from "react-router-dom";
 import { Navigate } from "react-router-dom";
 import NewsSummarizer from "./components/NewsSummarizer.jsx";
+import AnalyticsPage from "./pages/AnalyticsPage.jsx";
+
 const App = () => {
   const userData = useSelector((state) => state.user.userData);
   const navigate = useNavigate();
@@ -57,8 +59,11 @@ const App = () => {
           </>
         )}
         {userData && userData.role === "agency" && (
-          <Route path="/agencyhome" element={<Agency />} />
-        )}
+  <>
+    <Route path="/agencyhome" element={<Agency />} />
+    <Route path="/agency/resources" element={<AnalyticsPage />} />
+  </>
+)}
         {userData && userData.role === "coordinator" && (
           <Route path="/coordinatorhome" element={<Coordinator />} />
         )}
