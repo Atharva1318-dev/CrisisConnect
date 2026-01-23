@@ -113,7 +113,7 @@ const Agency = () => {
         {/* Main Content Area - Takes remaining space */}
         <div className="flex-1 flex p-6 gap-6">
           {/* LEFT PANEL - Incident Queue - Scrollable */}
-          <div className="w-[40%] flex flex-col">
+          <div className="w-[40%] h-[1320px] flex flex-col">
             <div className="bg-white rounded-2xl shadow-lg border border-gray-200 overflow-hidden flex flex-col h-full">
               <div className="p-6 border-b border-gray-100 flex-shrink-0">
                 <div className="flex items-center justify-between">
@@ -233,9 +233,9 @@ const Agency = () => {
           </div>
 
           {/* RIGHT PANEL - Map and Details */}
-          <div className="w-[60%] flex flex-col gap-6">
+          <div className="w-[60%] h-[90%] flex flex-col gap-6">
             {/* HUGE Map Section */}
-            <div className="flex-1 bg-white rounded-2xl shadow-lg border border-gray-200 overflow-hidden">
+            <div className="flex-1  bg-white rounded-2xl shadow-lg border border-gray-200 overflow-hidden">
               <div className="p-6 border-b border-gray-100">
                 <div className="flex items-center justify-between">
                   <div>
