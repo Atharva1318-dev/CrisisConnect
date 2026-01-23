@@ -3,343 +3,218 @@ import React, { useState, useRef, useEffect, useContext } from "react";
 import axios from "axios";
 import { AuthDataContext } from "../context/AuthDataContext";
 
-const SpeechRecognition =
+const SpeechRecognitionClass =
   typeof window !== "undefined" &&
   (window.webkitSpeechRecognition || window.SpeechRecognition);
 
 export default function Sos() {
+  const { serverUrl } = useContext(AuthDataContext);
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState("");
-  const [status, setStatus] = useState("Idle"); // Idle, Sending, Sent
+  const [status, setStatus] = useState("Idle");
   const [coords, setCoords] = useState(null);
   const [error, setError] = useState(null);
   const recognitionRef = useRef(null);
-  const { serverUrl } = useContext(AuthDataContext);
+  const recognitionLangRef = useRef(null);
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
+  const finalTranscriptRef = useRef("");
 
-  // Cleanup on component unmount
   useEffect(() => {
     return () => {
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.onresult = null;
-          recognitionRef.current.onend = null;
-        } catch {}
-        try {
-          recognitionRef.current.stop();
-        } catch {}
-        recognitionRef.current = null;
-      }
+      try { recognitionRef.current?.stop(); } catch {}
+      try { mediaRecorderRef.current?.stop(); } catch {}
     };
   }, []);
 
-  const startRecording = () => {
-    // Check browser support
-    if (!SpeechRecognition) {
-      setError("Speech recognition not supported in this browser.");
+  const getCurrentPositionAsync = (opts = {}) =>
+    new Promise((resolve, reject) => {
+      if (!navigator.geolocation) return reject(new Error("Geolocation not supported"));
+      navigator.geolocation.getCurrentPosition(
+        (pos) => resolve(pos),
+        (err) => reject(err),
+        opts
+      );
+    });
+
+  const startRecording = async () => {
+    setError(null);
+    setTranscript("");
+    finalTranscriptRef.current = "";
+    recognitionLangRef.current = navigator.language || "en-US";
+
+    try {
+      const pos = await getCurrentPositionAsync({ timeout: 3000 });
+      setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+    } catch (e) { console.warn("Geolocation (start) failed:", e); }
+
+    if (SpeechRecognitionClass) {
+      try {
+        const Rec = SpeechRecognitionClass;
+        const rec = new Rec();
+        rec.continuous = true;
+        rec.interimResults = true;
+        rec.lang = recognitionLangRef.current;
+        rec.onresult = (e) => {
+          let interim = "";
+          for (let i = e.resultIndex; i < e.results.length; i++) {
+            const r = e.results[i];
+            const t = r[0].transcript;
+            if (r.isFinal) finalTranscriptRef.current = (finalTranscriptRef.current + " " + t).trim();
+            else interim += t;
+          }
+          setTranscript((finalTranscriptRef.current + (interim ? " " + interim : "")).trim());
+        };
+        rec.onerror = (e) => { console.warn("Speech error", e); };
+        rec.onend = () => setIsListening(false);
+        recognitionRef.current = rec;
+        try { rec.start(); } catch (e) { console.warn("Recognition start error:", e); }
+      } catch (err) { console.warn("Speech recognition init error:", err); }
+    } else {
+      console.warn("SpeechRecognition not supported in this browser");
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mr = new MediaRecorder(stream);
+      audioChunksRef.current = [];
+      mr.ondataavailable = (ev) => { if (ev.data && ev.data.size) audioChunksRef.current.push(ev.data); };
+      mr.start(250);
+      mediaRecorderRef.current = mr;
+    } catch (err) {
+      console.error("Mic access error", err);
+      setError("Microphone access denied");
+      try { recognitionRef.current?.stop(); } catch {}
+      recognitionRef.current = null;
       return;
     }
 
-    setError(null);
-    setTranscript("");
-
-    // Capture GPS coordinates
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          setCoords({
-            lat: pos.coords.latitude,
-            lng: pos.coords.longitude,
-          });
-        },
-        (err) => {
-          console.warn("Geolocation error:", err.message);
-          setError("Unable to access GPS. Please enable location services.");
-          setCoords(null);
-        },
-        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-      );
-    } else {
-      setError("Geolocation not supported in this browser.");
-      setCoords(null);
-    }
-
-    // Initialize speech recognition
-    const Rec = SpeechRecognition;
-    const rec = new Rec();
-    rec.continuous = true;
-    rec.interimResults = true;
-    rec.lang = "en-US";
-
-    rec.onstart = () => {
-      console.log("Speech recognition started");
-    };
-
-    rec.onresult = (e) => {
-      let finalText = "";
-      let interimText = "";
-
-      // Process all results
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        const transcript_text = e.results[i][0].transcript;
-        if (e.results[i].isFinal) {
-          finalText += transcript_text + " ";
-        } else {
-          interimText += transcript_text;
-        }
-      }
-
-      // Update transcript state
-      setTranscript((prev) => {
-        const base = (prev || "").trim();
-        const withFinal = finalText ? (base + " " + finalText).trim() : base;
-        return interimText ? (withFinal + " " + interimText).trim() : withFinal;
-      });
-    };
-
-    rec.onerror = (e) => {
-      console.error("Speech recognition error:", e.error);
-      if (e.error !== "no-speech") {
-        setError(`Speech error: ${e.error}`);
-      }
-    };
-
-    rec.onend = () => {
-      console.log("Speech recognition ended");
-      setIsListening(false);
-    };
-
-    recognitionRef.current = rec;
-
-    try {
-      rec.start();
-      setIsListening(true);
-      setStatus("Idle");
-    } catch (err) {
-      console.error("Failed to start recognition:", err);
-      setError("Failed to start speech recognition");
-    }
+    setIsListening(true);
+    setStatus("Recording");
   };
 
   const stopRecording = async () => {
-    // Stop recognition
-    if (recognitionRef.current) {
+    setStatus("Processing");
+    try { recognitionRef.current?.stop(); } catch {}
+    recognitionRef.current = null;
+
+    if (!coords) {
       try {
-        recognitionRef.current.stop();
-      } catch (err) {
-        console.warn("Error stopping recognition:", err);
-      }
-      recognitionRef.current = null;
+        const pos = await getCurrentPositionAsync({ timeout: 5000 });
+        setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+      } catch (e) { console.warn("Geolocation (stop) failed:", e); }
     }
+
+    const mr = mediaRecorderRef.current;
+    if (!mr) { setIsListening(false); setError("No recording in progress"); setStatus("Idle"); return; }
+    try { if (mr.state !== "inactive") mr.stop(); } catch (e) { console.warn(e); }
+    mediaRecorderRef.current = null;
+
+    await new Promise((r) => setTimeout(r, 350));
+    const chunks = audioChunksRef.current;
+    audioChunksRef.current = [];
+    if (!chunks || chunks.length === 0) { setIsListening(false); setError("No audio captured"); setStatus("Idle"); return; }
+    const blob = new Blob(chunks, { type: "audio/webm" });
 
     setIsListening(false);
 
-    // Validate transcript
-    const rawText = (transcript || "").trim();
-    if (!rawText) {
-      setError("No speech detected. Please try again.");
-      return;
+    // Transcribe preserving original language
+    setStatus("Transcribing");
+    let groqTranscript = "";
+    let groqRaw = null;
+    try {
+      const form = new FormData();
+      form.append("file", blob, "sos.webm");
+      form.append("model", "whisper-large-v3");
+      // language hint (BCP-47) or "auto"
+      form.append("language", recognitionLangRef.current || navigator.language || "auto");
+      // request no translation (send transcript in original language)
+      form.append("translate", "false");
+      const groqKey = import.meta.env.VITE_GROQ_API;
+      const resp = await fetch("https://api.groq.com/v1/speech/transcriptions", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${groqKey}` },
+        body: form,
+      });
+      groqRaw = await resp.json();
+      console.log("Groq raw transcription response:", groqRaw);
+      // Groq may return different fields; prefer explicit original-text fields
+      groqTranscript = groqRaw?.text || groqRaw?.transcription || groqRaw?.data?.text || "";
+    } catch (err) {
+      console.error("Groq transcription error:", err);
+      setError("Transcription failed — will send raw interim text");
     }
 
-    // Validate coordinates
-    if (!coords) {
-      setError("GPS location not available. Please enable location access.");
-      return;
-    }
+    const finalTranscript = (groqTranscript && groqTranscript.trim()) ? groqTranscript.trim() : finalTranscriptRef.current.trim() || transcript.trim();
+    if (!finalTranscript) { setError("No transcribed text available"); setStatus("Idle"); return; }
 
-    // Prepare payload
-    const payload = {
-      rawText,
-      gpsCoordinates: coords,
-      timestamp: new Date().toISOString(),
-    };
-
-    // Send to backend
     setStatus("Sending");
     try {
-      const response = await axios.post(
-        `${serverUrl}/api/create-incident`,
-        payload,
-        {
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${localStorage.getItem("token") || ""}`,
-          },
-        }
-      );
+      const payload = {
+        mode: "VOICE",
+        transcript: finalTranscript,
+        description: finalTranscript,
+        latitude: coords?.lat,
+        longitude: coords?.lng,
+        severity: "Medium",
+        language: recognitionLangRef.current || navigator.language || "und",
+        groqRawResponse: groqRaw, // optional debugging payload
+      };
 
-      console.log("Incident created successfully:", response.data);
+      console.log("Frontend VOICE transcript:", payload.transcript);
+      console.log("Frontend VOICE language:", payload.language);
+
+      // send using cookies (withCredentials:true). DO NOT send Authorization header.
+      await axios.post(`${serverUrl || ""}/api/incident/create`, payload, {
+        headers: { "Content-Type": "application/json" },
+        withCredentials: true,
+      });
 
       setStatus("Sent");
       setError(null);
-
-      // Reset after 3 seconds
-      setTimeout(() => {
-        setStatus("Idle");
-        setTranscript("");
-        setCoords(null);
-      }, 3000);
+      setTranscript(finalTranscript);
+      setTimeout(() => { setStatus("Idle"); setTranscript(""); setCoords(null); finalTranscriptRef.current = ""; }, 3000);
     } catch (err) {
-      console.error("Failed to send incident:", err);
-      const errorMessage =
-        err?.response?.data?.error ||
-        err?.message ||
-        "Failed to send SOS alert";
-      setError(errorMessage);
+      console.error("Create incident error:", err);
+      setError(err?.response?.data?.message || "Failed to register incident");
       setStatus("Idle");
     }
   };
 
-  // Event handlers
-  const handleMouseDown = (e) => {
-    e.preventDefault();
-    startRecording();
-  };
-
-  const handleMouseUp = (e) => {
-    e.preventDefault();
-    stopRecording();
-  };
-
-  const handleTouchStart = (e) => {
-    e.preventDefault();
-    startRecording();
-  };
-
-  const handleTouchEnd = (e) => {
-    e.preventDefault();
-    stopRecording();
-  };
+  const handlePointerDown = (e) => { e.preventDefault(); if (!isListening) startRecording(); };
+  const handlePointerUp = (e) => { e.preventDefault(); if (isListening) stopRecording(); };
+  const handleKeyDown = (e) => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); if (!isListening) startRecording(); } };
+  const handleKeyUp = (e) => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); if (isListening) stopRecording(); } };
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-gradient-to-br from-gray-50 to-gray-100">
-      {/* Page Title */}
-      <div className="mb-12 text-center">
-        <h1 className="text-4xl md:text-5xl font-bold text-gray-900 mb-2">
-          Emergency SOS Alert
-        </h1>
-        <p className="text-gray-600 text-lg">
-          Press and hold the button, then speak to report an emergency
-        </p>
-      </div>
+    <div className="min-h-screen flex flex-col items-center justify-center p-4">
+      <h1 className="text-3xl font-bold mb-4">Emergency SOS — Voice</h1>
 
-      {/* Error Message */}
-      {error && (
-        <div className="w-full max-w-2xl mb-6 p-4 bg-red-100 border-l-4 border-red-500 rounded text-red-700 animate-pulse">
-          <p className="font-semibold">⚠️ Alert</p>
-          <p className="text-sm">{error}</p>
-        </div>
-      )}
+      {error && <div className="p-3 mb-4 text-red-700 bg-red-100 rounded">{error}</div>}
 
-      {/* SOS Button Container */}
-      <div className="relative mb-12">
-        {/* Outer pulse ring */}
-        <span
-          className={`absolute inset-0 rounded-full bg-red-500 opacity-40 ${
-            isListening ? "animate-ping" : "opacity-0"
-          }`}
-        />
-
-        {/* Middle pulse ring */}
-        <span
-          className={`absolute inset-3 rounded-full bg-red-500 opacity-30 ${
-            isListening ? "animate-pulse" : "opacity-0"
-          }`}
-        />
-
-        {/* Main Button */}
+      <div className="relative mb-8">
         <button
-          onMouseDown={handleMouseDown}
-          onMouseUp={handleMouseUp}
-          onTouchStart={handleTouchStart}
-          onTouchEnd={handleTouchEnd}
+          onPointerDown={handlePointerDown}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
+          onKeyDown={handleKeyDown}
+          onKeyUp={handleKeyUp}
+          className={`w-44 h-44 rounded-full text-white font-bold ${isListening ? "bg-red-600" : "bg-red-500"} shadow-lg`}
           aria-pressed={isListening}
-          aria-label="SOS Emergency Button"
-          className="relative z-10 w-40 h-40 md:w-56 md:h-56 rounded-full bg-gradient-to-b from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 shadow-2xl flex items-center justify-center text-white text-3xl md:text-5xl font-bold select-none active:scale-95 transform transition-transform duration-150"
         >
           SOS
         </button>
       </div>
 
-      {/* Status Grid */}
-      <div className="w-full max-w-2xl grid grid-cols-3 gap-4 mb-8">
-        {/* Status Card */}
-        <div className="bg-white rounded-lg shadow p-4 text-center">
-          <p className="text-xs text-gray-600 font-semibold mb-1">STATUS</p>
-          <p className="text-lg font-bold text-gray-900">
-            {status === "Sent" ? "✅ Sent" : status}
-          </p>
+      <div className="w-full max-w-2xl">
+        <div className="mb-3"><strong>Status:</strong> {status}</div>
+
+        <label className="block text-sm font-semibold mb-1">Live / Final Transcript</label>
+        <textarea readOnly value={transcript} className="w-full min-h-[120px] p-3 border rounded" />
+
+        <div className="mt-3 text-sm">
+          <div>GPS: {coords ? `${coords.lat.toFixed(6)}, ${coords.lng.toFixed(6)}` : "Not available"}</div>
         </div>
-
-        {/* Listening Card */}
-        <div className="bg-white rounded-lg shadow p-4 text-center">
-          <p className="text-xs text-gray-600 font-semibold mb-1">LISTENING</p>
-          <p
-            className={`text-lg font-bold ${
-              isListening ? "text-red-600 animate-pulse" : "text-gray-600"
-            }`}
-          >
-            {isListening ? "🔴 ON" : "⚪ OFF"}
-          </p>
-        </div>
-
-        {/* GPS Card */}
-        <div className="bg-white rounded-lg shadow p-4 text-center">
-          <p className="text-xs text-gray-600 font-semibold mb-1">GPS</p>
-          <p
-            className={`text-lg font-bold ${
-              coords ? "text-green-600" : "text-gray-600"
-            }`}
-          >
-            {coords ? "✓ Ready" : "✗ Waiting"}
-          </p>
-        </div>
-      </div>
-
-      {/* Transcript Box */}
-      <div className="w-full max-w-2xl mb-6">
-        <label className="block text-sm font-semibold text-gray-700 mb-2">
-          📝 Live Transcript
-        </label>
-        <textarea
-          readOnly
-          value={transcript}
-          placeholder="Press and hold the SOS button and speak..."
-          className="w-full min-h-[120px] p-4 border-2 border-gray-300 rounded-lg resize-none bg-white focus:border-red-500 focus:outline-none font-mono text-sm"
-        />
-        <p className="text-xs text-gray-500 mt-1">
-          {transcript.length} characters · {transcript.split(/\s+/).filter(Boolean).length} words
-        </p>
-      </div>
-
-      {/* GPS Coordinates Display */}
-      {coords && (
-        <div className="w-full max-w-2xl p-4 bg-blue-50 border-l-4 border-blue-500 rounded mb-6">
-          <p className="text-xs text-blue-600 font-bold mb-2">📍 GPS Location</p>
-          <p className="text-sm text-blue-800 font-mono">
-            <span className="font-semibold">Lat:</span> {coords.lat.toFixed(6)} | 
-            <span className="font-semibold"> Lng:</span> {coords.lng.toFixed(6)}
-          </p>
-        </div>
-      )}
-
-      {/* Success Message */}
-      {status === "Sent" && (
-        <div className="w-full max-w-2xl p-4 bg-green-50 border-l-4 border-green-500 rounded mb-6 animate-bounce">
-          <p className="text-lg font-bold text-green-700">
-            ✅ Help Dispatched Successfully
-          </p>
-          <p className="text-sm text-green-600 mt-1">
-            Emergency services have been notified with your location and message.
-          </p>
-        </div>
-      )}
-
-      {/* Footer Info */}
-      <div className="w-full max-w-2xl text-center text-xs text-gray-500 mt-8 border-t pt-6">
-        <p className="mb-2">
-          🔒 Your data is encrypted and sent securely to emergency services
-        </p>
-        <p>Stay calm. Professional help is on the way.</p>
       </div>
     </div>
   );

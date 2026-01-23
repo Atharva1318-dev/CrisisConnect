@@ -17,8 +17,14 @@ cloudinary.config({
 
 /**
  * Calculate trust score based on user verification & data type
+ * Uses $geoWithin with $centerSphere to avoid $near/$geoNear restrictions
  */
-const calcTrustScore = async (userId, hasImage = false, latitude = null, longitude = null) => {
+const calcTrustScore = async (
+  userId,
+  hasImage = false,
+  latitude = null,
+  longitude = null,
+) => {
   let score = 0;
 
   if (userId) {
@@ -44,14 +50,22 @@ const calcTrustScore = async (userId, hasImage = false, latitude = null, longitu
     !Number.isNaN(Number(longitude))
   ) {
     try {
+      // radius in meters
+      const radiusMeters = 5000; // 5 km
+      const earthRadiusMeters = 6378137;
+      const radiusInRadians = radiusMeters / earthRadiusMeters;
+
       const nearbyCount = await Incident.countDocuments({
         location: {
-          $near: {
-            $geometry: { type: "Point", coordinates: [Number(longitude), Number(latitude)] },
-            $maxDistance: 5000,
+          $geoWithin: {
+            $centerSphere: [
+              [Number(longitude), Number(latitude)],
+              radiusInRadians,
+            ],
           },
         },
       });
+
       if (nearbyCount > 0) score += Math.min(30, nearbyCount * 5);
     } catch (err) {
       console.error("calcTrustScore nearby check error:", err?.message || err);
@@ -62,10 +76,13 @@ const calcTrustScore = async (userId, hasImage = false, latitude = null, longitu
 };
 
 /**
- * Call local Ollama-like generate endpoint.
- * Supports optional images array in options.images (base64 strings).
+ * Call local Ollama-like generate endpoint (optional helper).
  */
-const analyzeWithOllama = async (prompt, model = "qwen3-coder:480b-cloud", options = {}) => {
+const analyzeWithOllama = async (
+  prompt,
+  model = "qwen3-coder:480b-cloud",
+  options = {},
+) => {
   try {
     const payload = { model, prompt, stream: false };
     if (options.images && Array.isArray(options.images) && options.images.length > 0) {
@@ -89,24 +106,39 @@ export const createIncident = async (req, res) => {
       mode,
       type,
       description,
-      transcript, // multilingual raw text from frontend (Groq)
-      imageBase64, // optional if not using multipart upload
+      transcript, // multilingual raw text from frontend
+      imageBase64,
       latitude,
       longitude,
       severity,
+      language,
     } = req.body;
+
+    // Console log incoming voice transcript & language for debugging
+    if (mode === "VOICE") {
+      console.log("createIncident - incoming VOICE payload:", {
+        transcript: transcript || "<empty>",
+        language: language || "<unknown>",
+        latitude,
+        longitude,
+        reportedBy: req.userId || "<unauthenticated>",
+      });
+    }
 
     if (!req.userId) return res.status(401).json({ message: "Authentication required to report incidents" });
 
     if (!mode || !["VOICE", "IMAGE_TEXT"].includes(mode)) {
       return res.status(400).json({ message: "mode must be either VOICE or IMAGE_TEXT" });
     }
+
     if (typeof latitude === "undefined" || typeof longitude === "undefined") {
       return res.status(400).json({ message: "latitude and longitude are required" });
     }
+
     if (mode === "VOICE" && !transcript) {
       return res.status(400).json({ message: "transcript is required for VOICE mode" });
     }
+
     if (mode === "IMAGE_TEXT" && !imageBase64 && !req.file) {
       return res.status(400).json({ message: "image file or imageBase64 is required for IMAGE_TEXT mode" });
     }
@@ -216,11 +248,132 @@ Report: "${textForAnalysis}"`;
   }
 };
 
-/* Remaining handlers unchanged (use your existing implementations) */
-export const getIncidents = async (req, res) => { /* ...existing code... */ };
-export const getIncidentById = async (req, res) => { /* ...existing code... */ };
-export const updateIncidentStatus = async (req, res) => { /* ...existing code... */ };
-export const markIncidentSpam = async (req, res) => { /* ...existing code... */ };
-export const getNearbyIncidents = async (req, res) => { /* ...existing code... */ };
-export const deleteIncident = async (req, res) => { /* ...existing code... */ };
-export const getIncidentStats = async (req, res) => { /* ...existing code... */ };
+/* Simple handlers for listing, fetching, updating, deleting incidents */
+
+export const getIncidents = async (req, res) => {
+  try {
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const limit = Math.min(100, Number(req.query.limit) || 20);
+    const skip = (page - 1) * limit;
+
+    const incidents = await Incident.find({})
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .populate("reportedBy", "name email phone role")
+      .lean();
+
+    const total = await Incident.countDocuments();
+
+    return res.status(200).json({ incidents, total, page, limit });
+  } catch (err) {
+    console.error("getIncidents error:", err?.message || err);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+export const getIncidentById = async (req, res) => {
+  try {
+    const { incidentId } = req.params;
+    const incident = await Incident.findById(incidentId).populate("reportedBy", "name email phone role");
+    if (!incident) return res.status(404).json({ message: "Incident not found" });
+    return res.status(200).json({ incident });
+  } catch (err) {
+    console.error("getIncidentById error:", err?.message || err);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+export const updateIncidentStatus = async (req, res) => {
+  try {
+    const { incidentId } = req.params;
+    const { status, respondedBy, dispatchedResources } = req.body;
+    const incident = await Incident.findById(incidentId);
+    if (!incident) return res.status(404).json({ message: "Incident not found" });
+
+    if (status) incident.status = status;
+    if (respondedBy) incident.respondedBy = respondedBy;
+    if (dispatchedResources && Array.isArray(dispatchedResources)) incident.dispatchedResources = dispatchedResources;
+
+    await incident.save();
+    await incident.populate("reportedBy", "name email phone role");
+
+    return res.status(200).json({ message: "Incident updated", incident });
+  } catch (err) {
+    console.error("updateIncidentStatus error:", err?.message || err);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+export const markIncidentSpam = async (req, res) => {
+  try {
+    const { incidentId } = req.params;
+    const incident = await Incident.findById(incidentId);
+    if (!incident) return res.status(404).json({ message: "Incident not found" });
+    incident.status = "Spam";
+    await incident.save();
+    return res.status(200).json({ message: "Marked as spam", incident });
+  } catch (err) {
+    console.error("markIncidentSpam error:", err?.message || err);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+/**
+ * Nearby incidents - returns incidents within a radius (meters)
+ * Uses $geoWithin + $centerSphere to avoid $near/$geoNear restrictions
+ */
+export const getNearbyIncidents = async (req, res) => {
+  try {
+    const lat = Number(req.params.lat);
+    const lon = Number(req.params.lon);
+    if (Number.isNaN(lat) || Number.isNaN(lon)) return res.status(400).json({ message: "Invalid coordinates" });
+
+    const radiusMeters = Number(req.query.radius) || 5000; // default 5km
+    const earthRadiusMeters = 6378137;
+    const radiusInRadians = radiusMeters / earthRadiusMeters;
+
+    const incidents = await Incident.find({
+      location: {
+        $geoWithin: {
+          $centerSphere: [[lon, lat], radiusInRadians],
+        },
+      },
+    })
+      .sort({ createdAt: -1 })
+      .limit(200)
+      .populate("reportedBy", "name email phone role")
+      .lean();
+
+    return res.status(200).json({ incidents, count: incidents.length });
+  } catch (err) {
+    console.error("getNearbyIncidents error:", err?.message || err);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+export const deleteIncident = async (req, res) => {
+  try {
+    const { incidentId } = req.params;
+    const incident = await Incident.findByIdAndDelete(incidentId);
+    if (!incident) return res.status(404).json({ message: "Incident not found" });
+    return res.status(200).json({ message: "Incident deleted" });
+  } catch (err) {
+    console.error("deleteIncident error:", err?.message || err);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+export const getIncidentStats = async (req, res) => {
+  try {
+    const total = await Incident.countDocuments();
+    const byStatus = await Incident.aggregate([
+      { $group: { _id: "$status", count: { $sum: 1 } } },
+    ]);
+    const recent = await Incident.find().sort({ createdAt: -1 }).limit(10).lean();
+    return res.status(200).json({ total, byStatus, recent });
+  } catch (err) {
+    console.error("getIncidentStats error:", err?.message || err);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};

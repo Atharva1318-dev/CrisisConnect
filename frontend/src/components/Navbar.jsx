@@ -31,7 +31,7 @@ const Navbar = () => {
   } else if (userData.role === "citizen") {
     navLinks = [
       { name: "Dashboard", href: "/citizenhome", icon: <IoHomeOutline size={20} /> },
-      { name: "Report", href: "/citizen/report", icon: <IoListOutline size={20} /> },
+      { name: "Report", href: "/sos", icon: <IoListOutline size={20} /> },
       { name: "My Incidents", href: "/citizen/incidents", icon: <IoMapOutline size={20} /> },
       { name: "Map", href: "/citizen/map", icon: <IoMapOutline size={20} /> },
     ];

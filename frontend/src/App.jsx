@@ -9,7 +9,7 @@ import Citizen from "./pages/Citizen.jsx";
 import Coordinator from "./pages/Coordinator.jsx";
 import Navbar from "./components/Navbar.jsx";
 import Footer from "./components/Footer.jsx";
-
+import Sos from "./components/Sos.jsx";
 import UserDataContext from "./context/UserDataContext.jsx";
 import { useDispatch, useSelector } from "react-redux";
 import "react-toastify/dist/ReactToastify.css";
@@ -49,7 +49,10 @@ const App = () => {
         <Route path="/crises" element={<NewsSummarizer />} />
         
         {userData && userData.role === "citizen" && (
+          <>
           <Route path="/citizenhome" element={<Citizen />} />
+          <Route path="/sos" element={<Sos />} />
+          </>
         )}
         {userData && userData.role === "agency" && (
           <Route path="/agencyhome" element={<Agency />} />
