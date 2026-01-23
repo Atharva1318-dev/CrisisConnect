@@ -11,6 +11,7 @@ import Navbar from "./components/Navbar.jsx";
 import Footer from "./components/Footer.jsx";
 import Sos from "./components/Sos.jsx";
 import UserDataContext from "./context/UserDataContext.jsx";
+import ImageTextInput from "./components/ImageTextInput.jsx";
 import { useDispatch, useSelector } from "react-redux";
 import "react-toastify/dist/ReactToastify.css";
 import { useNavigate } from "react-router-dom";
@@ -52,6 +53,7 @@ const App = () => {
           <>
           <Route path="/citizenhome" element={<Citizen />} />
           <Route path="/sos" element={<Sos />} />
+          <Route path="/imagetext" element={<ImageTextInput />} />
           </>
         )}
         {userData && userData.role === "agency" && (

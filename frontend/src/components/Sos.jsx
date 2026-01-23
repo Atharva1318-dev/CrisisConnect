@@ -1,6 +1,7 @@
 "use client";
 import React, { useState, useRef, useEffect, useContext } from "react";
 import axios from "axios";
+import { useNavigate } from "react-router-dom";
 import { AuthDataContext } from "../context/AuthDataContext";
 
 const SpeechRecognitionClass =
@@ -8,6 +9,7 @@ const SpeechRecognitionClass =
   (window.webkitSpeechRecognition || window.SpeechRecognition);
 
 export default function Sos() {
+  const navigate = useNavigate();
   const { serverUrl } = useContext(AuthDataContext);
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState("");
@@ -172,12 +174,10 @@ export default function Sos() {
       const form = new FormData();
       form.append("file", blob, "sos.webm");
       form.append("model", "whisper-large-v3");
-      // language hint (BCP-47) or "auto"
       form.append(
         "language",
         recognitionLangRef.current || navigator.language || "auto",
       );
-      // request no translation (send transcript in original language)
       form.append("translate", "false");
       const groqKey = import.meta.env.VITE_GROQ_API;
       const resp = await fetch(
@@ -190,7 +190,6 @@ export default function Sos() {
       );
       groqRaw = await resp.json();
       console.log("Groq raw transcription response:", groqRaw);
-      // Groq may return different fields; prefer explicit original-text fields
       groqTranscript =
         groqRaw?.text || groqRaw?.transcription || groqRaw?.data?.text || "";
     } catch (err) {
@@ -218,13 +217,12 @@ export default function Sos() {
         longitude: coords?.lng,
         severity: "Medium",
         language: recognitionLangRef.current || navigator.language || "und",
-        groqRawResponse: groqRaw, // optional debugging payload
+        groqRawResponse: groqRaw,
       };
 
       console.log("Frontend VOICE transcript:", payload.transcript);
       console.log("Frontend VOICE language:", payload.language);
 
-      // send using cookies (withCredentials:true). DO NOT send Authorization header.
       await axios.post(`${serverUrl || ""}/api/incident/create`, payload, {
         headers: { "Content-Type": "application/json" },
         withCredentials: true,
@@ -268,7 +266,16 @@ export default function Sos() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-4">
+    <div className="min-h-screen flex flex-col items-center justify-center p-4 relative">
+      {/* Top Right Navigation Button */}
+      <button
+        onClick={() => navigate("/imagetext")}
+        className="absolute top-6 right-6 px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white font-semibold rounded-lg shadow-md transition-all duration-200 flex items-center gap-2"
+      >
+        <span className="text-lg">+</span>
+        <span>Report</span>
+      </button>
+
       <h1 className="text-3xl font-bold mb-4">Emergency SOS — Voice</h1>
 
       {error && (
