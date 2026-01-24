@@ -32,12 +32,18 @@ export default function SignUp() {
       const res = await axios.post(
         `${serverUrl}/api/auth/signup`,
         { name, email, password },
-        { withCredentials: true }
+        { withCredentials: true },
       );
-        dispatch(setUserData(res.data.user));
-        toast.success("Signup Successful");
-       
-      
+      dispatch(setUserData(res.data.user));
+      toast.success("Signup Successful");
+      const role = res.data.user.role;
+      if (role === "citizen") {
+        navigate("/citizenhome");
+      } else if (role === "agency") {
+        navigate("/agencyhome");
+      } else if (role === "coordinator") {
+        navigate("/coordinatorhome");
+      }
     } catch (err) {
       toast.error("Signup Failed");
       setError(err.response?.data?.message || "Signup failed");
@@ -49,18 +55,27 @@ export default function SignUp() {
   const handleGoogleAuth = async () => {
     try {
       const result = await signInWithPopup(auth, provider);
-      const user=result.user;
-      const name=user.displayName;
-      const email=user.email;
-      const res=await axios.post(`${serverUrl}/api/auth/google`,{name,email},{withCredentials:true});
+      const user = result.user;
+      const name = user.displayName;
+      const email = user.email;
+      const res = await axios.post(
+        `${serverUrl}/api/auth/google`,
+        { name, email },
+        { withCredentials: true },
+      );
       dispatch(setUserData(res.data.user));
       toast.success("Google Sign-In Successful");
-      
-      
+      const role = res.data.user.role;
+      if (role === "citizen") {
+        navigate("/citizenhome");
+      } else if (role === "agency") {
+        navigate("/agencyhome");
+      } else if (role === "coordinator") {
+        navigate("/coordinatorhome");
+      }
     } catch (error) {
       console.error("Google Sign-In Failed", error);
       toast.error("Google Sign-In Failed");
-      
     }
   };
 
@@ -143,7 +158,10 @@ export default function SignUp() {
         {/* Footer */}
         <p className="mt-6 text-center text-xs text-gray-600">
           Already have an account?{" "}
-          <Link to="/login" className="text-black font-semibold hover:underline">
+          <Link
+            to="/login"
+            className="text-black font-semibold hover:underline"
+          >
             Sign in
           </Link>
         </p>
