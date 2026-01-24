@@ -19,7 +19,7 @@ import { Navigate } from "react-router-dom";
 import NewsSummarizer from "./components/NewsSummarizer.jsx";
 import AnalyticsPage from "./pages/AnalyticsPage.jsx";
 import Maps from "./components/Maps.jsx";
-
+import ContactUs from "./components/ContactUs.jsx";
 const App = () => {
   const userData = useSelector((state) => state.user.userData);
   const navigate = useNavigate();
@@ -51,7 +51,7 @@ const App = () => {
           element={userData ? <Navigate to="/" /> : <Login />}
         />
         <Route path="/crises" element={<NewsSummarizer />} />
-
+        <Route path="/contact" element={<ContactUs />} />
         {userData && userData.role === "citizen" && (
           <>
             <Route path="/citizenhome" element={<Citizen />} />
