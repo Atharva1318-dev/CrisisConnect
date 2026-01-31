@@ -13,12 +13,20 @@ const Home = () => {
               <Radio className="w-4 h-4 text-blue-600 animate-pulse" />
               <span className="text-sm font-medium text-blue-600">Real-time Crisis Detection</span>
             </div>
+<<<<<<< HEAD
 
+=======
+            
+>>>>>>> 0b977cb67d79c97a8b4889e36331b54cb02effde
             <h1 className="text-5xl md:text-7xl font-bold text-gray-900 leading-tight">
               Real-time Emergency<br />
               <span className="bg-gradient-to-r from-blue-600 to-blue-400 bg-clip-text text-transparent">Response System</span>
             </h1>
+<<<<<<< HEAD
 
+=======
+            
+>>>>>>> 0b977cb67d79c97a8b4889e36331b54cb02effde
             <p className="text-xl text-gray-600 max-w-3xl mx-auto leading-relaxed">
               Detect crises as they happen. AI-powered incident detection, instant reporting, and coordinated emergency response. Save lives in real-time.
             </p>

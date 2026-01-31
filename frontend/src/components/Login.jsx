@@ -30,11 +30,18 @@ export default function Login() {
       const res = await axios.post(
         `${serverUrl}/api/auth/login`,
         { email, password },
-        { withCredentials: true }
+        { withCredentials: true },
       );
       dispatch(setUserData(res.data.user));
       toast.success("Login Successful");
-      
+      const role = res.data.user.role;
+      if (role === "citizen") {
+        navigate("/citizenhome");
+      } else if (role === "agency") {
+        navigate("/agencyhome");
+      } else if (role === "coordinator") {
+        navigate("/coordinatorhome");
+      }
     } catch (err) {
       toast.error("Login Failed");
       setError(err.response?.data?.message || "Login failed");
@@ -51,11 +58,18 @@ export default function Login() {
       const res = await axios.post(
         `${serverUrl}/api/auth/google`,
         { name, email },
-        { withCredentials: true }
+        { withCredentials: true },
       );
       dispatch(setUserData(res.data.user));
       toast.success("Google Sign-In Successful");
-      
+      const role = res.data.user.role;
+      if (role === "citizen") {
+        navigate("/citizenhome");
+      } else if (role === "agency") {
+        navigate("/agencyhome");
+      } else if (role === "coordinator") {
+        navigate("/coordinatorhome");
+      }
     } catch (error) {
       console.error("Google Sign-In Failed", error);
       toast.error("Google Sign-In Failed");
