@@ -9,6 +9,8 @@ import cookieParser from "cookie-parser";
 import NewsRouter from "./routes/new.routes.js";
 import ResourceRouter from "./routes/resource.routes.js";
 
+import RequestRouter from "./routes/request.routes.js";
+
 dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -32,6 +34,8 @@ app.use("/api/user", UserRouter);
 app.use("/api/news", NewsRouter);
 app.use("/api/incident", IncidentRouter);
 app.use("/api/resource", ResourceRouter);
+
+app.use("/api/request", RequestRouter);
 
 app.get("/", (req, res) => {
   res.send("API is running...");

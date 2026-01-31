@@ -11,7 +11,7 @@ const resourceSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["Available", "Depleted", "Reserved", "Maintenance"],
+      enum: ["Available", "Depleted", "Reserved", "Maintenance", "Deployed"],
       default: "Available",
     },
 

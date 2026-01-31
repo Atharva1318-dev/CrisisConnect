@@ -26,10 +26,10 @@ export default function Sos() {
     return () => {
       try {
         recognitionRef.current?.stop();
-      } catch {}
+      } catch { }
       try {
         mediaRecorderRef.current?.stop();
-      } catch {}
+      } catch { }
     };
   }, []);
 
@@ -114,7 +114,7 @@ export default function Sos() {
       setError("Microphone access denied");
       try {
         recognitionRef.current?.stop();
-      } catch {}
+      } catch { }
       recognitionRef.current = null;
       return;
     }
@@ -127,7 +127,7 @@ export default function Sos() {
     setStatus("Processing");
     try {
       recognitionRef.current?.stop();
-    } catch {}
+    } catch { }
     recognitionRef.current = null;
 
     if (!coords) {

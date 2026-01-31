@@ -18,6 +18,7 @@ import { useNavigate } from "react-router-dom";
 import { Navigate } from "react-router-dom";
 import NewsSummarizer from "./components/NewsSummarizer.jsx";
 import AnalyticsPage from "./pages/AnalyticsPage.jsx";
+import CoordinatorManage from "./pages/CoordinatorManage.jsx";
 
 const App = () => {
   const userData = useSelector((state) => state.user.userData);
@@ -50,22 +51,25 @@ const App = () => {
           element={userData ? <Navigate to="/" /> : <Login />}
         />
         <Route path="/crises" element={<NewsSummarizer />} />
-        
+
         {userData && userData.role === "citizen" && (
           <>
-          <Route path="/citizenhome" element={<Citizen />} />
-          <Route path="/sos" element={<Sos />} />
-          <Route path="/imagetext" element={<ImageTextInput />} />
+            <Route path="/citizenhome" element={<Citizen />} />
+            <Route path="/sos" element={<Sos />} />
+            <Route path="/imagetext" element={<ImageTextInput />} />
           </>
         )}
         {userData && userData.role === "agency" && (
-  <>
-    <Route path="/agencyhome" element={<Agency />} />
-    <Route path="/agency/resources" element={<AnalyticsPage />} />
-  </>
-)}
+          <>
+            <Route path="/agencyhome" element={<Agency />} />
+            <Route path="/agency/resources" element={<AnalyticsPage />} />
+          </>
+        )}
         {userData && userData.role === "coordinator" && (
-          <Route path="/coordinatorhome" element={<Coordinator />} />
+          <>
+            <Route path="/coordinatorhome" element={<Coordinator />} />
+            <Route path="/coordinator/manage" element={<CoordinatorManage />} />
+          </>
         )}
       </Routes>
       <Footer />

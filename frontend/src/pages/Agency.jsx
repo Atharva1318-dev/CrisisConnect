@@ -7,6 +7,12 @@ const RESOURCE_API = "http://localhost:8901/api/resource";
 
 
 const Agency = () => {
+
+  const [coordinators, setCoordinators] = useState([]);
+  const [selectedCoordinator, setSelectedCoordinator] = useState(null);
+  const [step, setStep] = useState(1);
+
+
   const [incidents, setIncidents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedIncident, setSelectedIncident] = useState(null);
@@ -17,6 +23,21 @@ const Agency = () => {
     Medium: 3,
     High: 5,
     Critical: 8,
+  };
+
+  const fetchCoordinators = async () => {
+    if (!selectedIncident) return;
+    try {
+      const res = await axios.post(`http://localhost:8901/api/request/nearby`, {
+        latitude: selectedIncident.location.coordinates[1],
+        longitude: selectedIncident.location.coordinates[0],
+        radius: 50 // 50km search radius
+      }, { withCredentials: true });
+      setCoordinators(res.data.coordinators);
+      setStep(2); // Move to next step
+    } catch (err) {
+      alert("Failed to find coordinators");
+    }
   };
 
   const fetchIncidents = async () => {
@@ -64,43 +85,27 @@ const Agency = () => {
   };
 
   const handleDispatch = async () => {
-  try {
-    console.log("DISPATCHING RESOURCES:", dispatchResources);
+    if (!selectedCoordinator) return alert("Please select a coordinator");
 
-    for (const resource of dispatchResources) {
-      await axios.post(
-        `${RESOURCE_API}/create`,
-        {
-          item_name: resource.item_name,
-          category: resource.category,
-          quantity: resource.quantity,
+    try {
+      await axios.post(`http://localhost:8901/api/request/create`, {
+        coordinatorId: selectedCoordinator._id,
+        incidentId: selectedIncident._id,
+        resources: dispatchResources
+      }, { withCredentials: true });
 
-          // 🔴 REQUIRED BY BACKEND
-          latitude: selectedIncident.location.coordinates[1],
-          longitude: selectedIncident.location.coordinates[0],
+      // Update local incident status to show we acted on it
+      await axios.patch(`${API}/${selectedIncident._id}/status`, { status: "Active" }, { withCredentials: true });
 
-          status: "Reserved",
-        },
-        { withCredentials: true }
-      );
+      alert(`✅ Request sent to ${selectedCoordinator.name}! They have been notified via SMS.`);
+      setShowDispatchModal(false);
+      setStep(1); // Reset
+      fetchIncidents();
+    } catch (err) {
+      console.error(err);
+      alert("Failed to send request");
     }
-
-    // Mark incident as Active
-    await axios.patch(
-      `${API}/${selectedIncident._id}/status`,
-      { status: "Active" },
-      { withCredentials: true }
-    );
-
-    alert("Resources dispatched successfully 🚑");
-
-    setShowDispatchModal(false);
-    fetchIncidents();
-  } catch (err) {
-    console.error("Dispatch failed:", err);
-    alert("Dispatch failed. Check console.");
-  }
-};
+  };
 
 
   const getSeverityColor = (severity) => {
@@ -562,63 +567,71 @@ const Agency = () => {
         {/* 🔴 DISPATCH MODAL – PASTE HERE */}
         {showDispatchModal && (
           <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-            <div className="bg-white w-[400px] rounded-xl p-6 shadow-xl">
-              <h2 className="text-xl font-bold mb-4">
-                🚑 Deploy Resources
+            <div className="bg-white w-[500px] rounded-xl p-6 shadow-xl transition-all">
+              <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
+                {step === 1 ? "🚑 Step 1: Define Resources" : "📡 Step 2: Select Coordinator"}
               </h2>
 
-              <div className="space-y-4 mb-6">
-                {dispatchResources.map((res, index) => (
-                  <div
-                    key={index}
-                    className="grid grid-cols-3 gap-3 items-center"
-                  >
-                    <input
-                      type="text"
-                      value={res.item_name}
-                      readOnly
-                      className="border rounded-lg px-3 py-2 bg-gray-100 text-sm"
-                    />
-
-                    <input
-                      type="text"
-                      value={res.category}
-                      readOnly
-                      className="border rounded-lg px-3 py-2 bg-gray-100 text-sm"
-                    />
-
-                    <input
-                      type="number"
-                      value={res.quantity}
-                      onChange={(e) => {
-                        const updated = [...dispatchResources];
-                        updated[index].quantity = Number(e.target.value);
-                        setDispatchResources(updated);
-                      }}
-                      className="border rounded-lg px-3 py-2 text-sm"
-                    />
+              {/* STEP 1: SELECT RESOURCES */}
+              {step === 1 && (
+                <>
+                  <div className="space-y-4 mb-6">
+                    {dispatchResources.map((res, index) => (
+                      <div key={index} className="grid grid-cols-3 gap-3 items-center">
+                        <input type="text" value={res.item_name} readOnly className="border rounded-lg px-3 py-2 bg-gray-100 text-sm" />
+                        <input type="text" value={res.category} readOnly className="border rounded-lg px-3 py-2 bg-gray-100 text-sm" />
+                        <input type="number" value={res.quantity} onChange={(e) => {
+                          const updated = [...dispatchResources];
+                          updated[index].quantity = Number(e.target.value);
+                          setDispatchResources(updated);
+                        }} className="border rounded-lg px-3 py-2 text-sm" />
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
+                  <div className="flex justify-end gap-3">
+                    <button onClick={() => setShowDispatchModal(false)} className="px-4 py-2 border rounded-lg">Cancel</button>
+                    <button onClick={fetchCoordinators} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                      Find Coordinators →
+                    </button>
+                  </div>
+                </>
+              )}
 
-
-              <div className="flex justify-end gap-3">
-                <button
-                  onClick={() => setShowDispatchModal(false)}
-                  className="px-4 py-2 border rounded-lg"
-                >
-                  Cancel
-                </button>
-
-                <button
-  onClick={handleDispatch}
-  className="px-4 py-2 bg-green-600 text-white rounded-lg"
->
-  Dispatch
-</button>
-
-
-              </div>
+              {/* STEP 2: SELECT COORDINATOR */}
+              {step === 2 && (
+                <>
+                  <p className="text-sm text-gray-500 mb-3">Found {coordinators.length} coordinators near the incident location.</p>
+                  <div className="max-h-60 overflow-y-auto space-y-3 mb-6">
+                    {coordinators.length === 0 ? (
+                      <p className="text-center text-gray-500 py-4">No coordinators found nearby.</p>
+                    ) : (
+                      coordinators.map((coord) => (
+                        <div
+                          key={coord._id}
+                          onClick={() => setSelectedCoordinator(coord)}
+                          className={`p-3 border rounded-xl cursor-pointer flex justify-between items-center ${selectedCoordinator?._id === coord._id ? 'border-blue-500 bg-blue-50' : 'hover:bg-gray-50'}`}
+                        >
+                          <div>
+                            <p className="font-bold text-gray-900">{coord.name}</p>
+                            <p className="text-xs text-gray-500">{coord.distanceKm.toFixed(1)} km away • {coord.resourceCount} assets</p>
+                          </div>
+                          {selectedCoordinator?._id === coord._id && <span className="text-blue-600 font-bold">✓</span>}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  <div className="flex justify-end gap-3">
+                    <button onClick={() => setStep(1)} className="px-4 py-2 border rounded-lg">← Back</button>
+                    <button
+                      onClick={handleDispatch}
+                      disabled={!selectedCoordinator}
+                      className={`px-4 py-2 rounded-lg text-white ${!selectedCoordinator ? 'bg-gray-300' : 'bg-green-600 hover:bg-green-700'}`}
+                    >
+                      Send Request
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         )}
