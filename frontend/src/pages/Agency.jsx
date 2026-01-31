@@ -713,9 +713,9 @@ const TacticalMap = ({ incidents }) => {
   const mapCenter =
     incidents.length > 0
       ? [
-          incidents[0].location.coordinates[1],
-          incidents[0].location.coordinates[0],
-        ]
+        incidents[0].location.coordinates[1],
+        incidents[0].location.coordinates[0],
+      ]
       : defaultCenter;
 
   return (
@@ -773,18 +773,18 @@ const TacticalMap = ({ incidents }) => {
                           incident.status === "Active"
                             ? "rgba(34, 197, 94, 0.2)"
                             : incident.status === "Pending"
-                            ? "rgba(234, 179, 8, 0.2)"
-                            : incident.status === "Spam"
-                            ? "rgba(239, 68, 68, 0.2)"
-                            : "rgba(59, 130, 246, 0.2)",
+                              ? "rgba(234, 179, 8, 0.2)"
+                              : incident.status === "Spam"
+                                ? "rgba(239, 68, 68, 0.2)"
+                                : "rgba(59, 130, 246, 0.2)",
                         color:
                           incident.status === "Active"
                             ? "#16a34a"
                             : incident.status === "Pending"
-                            ? "#b45309"
-                            : incident.status === "Spam"
-                            ? "#991b1b"
-                            : "#1e40af",
+                              ? "#b45309"
+                              : incident.status === "Spam"
+                                ? "#991b1b"
+                                : "#1e40af",
                       }}
                     >
                       {incident.status}
@@ -809,7 +809,6 @@ const TacticalMap = ({ incidents }) => {
 };
 
 const Agency = () => {
-<<<<<<< HEAD
 
   const [coordinators, setCoordinators] = useState([]);
   const [selectedCoordinator, setSelectedCoordinator] = useState(null);
@@ -817,11 +816,9 @@ const Agency = () => {
 
 
   const [incidents, setIncidents] = useState([]);
-=======
   const { serverUrl } = useContext(AuthDataContext);
   const [allIncidents, setAllIncidents] = useState([]);
   const [pendingIncidents, setPendingIncidents] = useState([]);
->>>>>>> 0b977cb67d79c97a8b4889e36331b54cb02effde
   const [loading, setLoading] = useState(true);
   const [selectedIncident, setSelectedIncident] = useState(null);
   const [showDispatchModal, setShowDispatchModal] = useState(false);
@@ -904,7 +901,6 @@ const Agency = () => {
   };
 
   const handleDispatch = async () => {
-<<<<<<< HEAD
     if (!selectedCoordinator) return alert("Please select a coordinator");
 
     try {
@@ -927,38 +923,6 @@ const Agency = () => {
     }
   };
 
-=======
-    try {
-      for (const resource of dispatchResources) {
-        await axios.post(
-          `${serverUrl}/api/resource/create`,
-          {
-            item_name: resource.item_name,
-            category: resource.category,
-            quantity: resource.quantity,
-            latitude: selectedIncident.location.coordinates[1],
-            longitude: selectedIncident.location.coordinates[0],
-            status: "Reserved",
-          },
-          { withCredentials: true }
-        );
-      }
-
-      await axios.patch(
-        `${serverUrl}/api/incident/${selectedIncident._id}/status`,
-        { status: "Active" },
-        { withCredentials: true }
-      );
-
-      alert("Resources dispatched successfully 🚑");
-      setShowDispatchModal(false);
-      fetchIncidents();
-    } catch (err) {
-      console.error("Dispatch failed:", err);
-      alert("Dispatch failed. Check console.");
-    }
-  };
->>>>>>> 0b977cb67d79c97a8b4889e36331b54cb02effde
 
   const getSeverityColor = (severity) => {
     switch (severity?.toLowerCase()) {
@@ -1107,11 +1071,10 @@ const Agency = () => {
                         <div
                           key={incident._id}
                           onClick={() => setSelectedIncident(incident)}
-                          className={`bg-white rounded-2xl border-2 p-5 cursor-pointer transition-all hover:shadow-lg ${
-                            selectedIncident?._id === incident._id
+                          className={`bg-white rounded-2xl border-2 p-5 cursor-pointer transition-all hover:shadow-lg ${selectedIncident?._id === incident._id
                               ? "border-blue-500 bg-blue-50"
                               : "border-gray-200 hover:border-gray-300"
-                          }`}
+                            }`}
                         >
                           <div className="flex items-start justify-between mb-4">
                             <div className="flex items-center gap-4">
@@ -1558,7 +1521,6 @@ const Agency = () => {
         {/* DISPATCH MODAL */}
         {showDispatchModal && (
           <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-<<<<<<< HEAD
             <div className="bg-white w-[500px] rounded-xl p-6 shadow-xl transition-all">
               <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
                 {step === 1 ? "🚑 Step 1: Define Resources" : "📡 Step 2: Select Coordinator"}
@@ -1579,38 +1541,6 @@ const Agency = () => {
                         }} className="border rounded-lg px-3 py-2 text-sm" />
                       </div>
                     ))}
-=======
-            <div className="bg-white w-[400px] rounded-xl p-6 shadow-xl">
-              <h2 className="text-xl font-bold mb-4">🚑 Deploy Resources</h2>
-
-              <div className="space-y-4 mb-6">
-                {dispatchResources.map((res, index) => (
-                  <div key={index} className="grid grid-cols-3 gap-3 items-center">
-                    <input
-                      type="text"
-                      value={res.item_name}
-                      readOnly
-                      className="border rounded-lg px-3 py-2 bg-gray-100 text-sm"
-                    />
-
-                    <input
-                      type="text"
-                      value={res.category}
-                      readOnly
-                      className="border rounded-lg px-3 py-2 bg-gray-100 text-sm"
-                    />
-
-                    <input
-                      type="number"
-                      value={res.quantity}
-                      onChange={(e) => {
-                        const updated = [...dispatchResources];
-                        updated[index].quantity = Number(e.target.value);
-                        setDispatchResources(updated);
-                      }}
-                      className="border rounded-lg px-3 py-2 text-sm"
-                    />
->>>>>>> 0b977cb67d79c97a8b4889e36331b54cb02effde
                   </div>
                   <div className="flex justify-end gap-3">
                     <button onClick={() => setShowDispatchModal(false)} className="px-4 py-2 border rounded-lg">Cancel</button>
@@ -1621,7 +1551,6 @@ const Agency = () => {
                 </>
               )}
 
-<<<<<<< HEAD
               {/* STEP 2: SELECT COORDINATOR */}
               {step === 2 && (
                 <>
@@ -1657,23 +1586,6 @@ const Agency = () => {
                   </div>
                 </>
               )}
-=======
-              <div className="flex justify-end gap-3">
-                <button
-                  onClick={() => setShowDispatchModal(false)}
-                  className="px-4 py-2 border rounded-lg"
-                >
-                  Cancel
-                </button>
-
-                <button
-                  onClick={handleDispatch}
-                  className="px-4 py-2 bg-green-600 text-white rounded-lg"
-                >
-                  Dispatch
-                </button>
-              </div>
->>>>>>> 0b977cb67d79c97a8b4889e36331b54cb02effde
             </div>
           </div>
         )}
