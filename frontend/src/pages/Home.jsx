@@ -13,20 +13,12 @@ const Home = () => {
               <Radio className="w-4 h-4 text-blue-600 animate-pulse" />
               <span className="text-sm font-medium text-blue-600">Real-time Crisis Detection</span>
             </div>
-<<<<<<< HEAD
 
-=======
-            
->>>>>>> 0b977cb67d79c97a8b4889e36331b54cb02effde
             <h1 className="text-5xl md:text-7xl font-bold text-gray-900 leading-tight">
               Real-time Emergency<br />
               <span className="bg-gradient-to-r from-blue-600 to-blue-400 bg-clip-text text-transparent">Response System</span>
             </h1>
-<<<<<<< HEAD
 
-=======
-            
->>>>>>> 0b977cb67d79c97a8b4889e36331b54cb02effde
             <p className="text-xl text-gray-600 max-w-3xl mx-auto leading-relaxed">
               Detect crises as they happen. AI-powered incident detection, instant reporting, and coordinated emergency response. Save lives in real-time.
             </p>
@@ -220,56 +212,6 @@ const Home = () => {
           <p className="text-gray-500 text-sm">Available 24/7 • All devices • Multiple languages</p>
         </div>
       </section>
-
-      {/* Footer */}
-      <footer className="border-t border-gray-200 py-12 px-4 sm:px-6 lg:px-8 bg-gray-50">
-        <div className="max-w-6xl mx-auto">
-          <div className="grid md:grid-cols-4 gap-8 mb-8">
-            <div>
-              <div className="flex items-center gap-2 mb-4">
-                <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-                  <AlertCircle className="w-5 h-5 text-white" />
-                </div>
-                <span className="font-bold text-gray-900">CrisisAlert</span>
-              </div>
-              <p className="text-gray-600 text-sm">Real-time emergency response for everyone</p>
-            </div>
-            <div>
-              <h4 className="font-semibold text-gray-900 mb-3">Product</h4>
-              <ul className="space-y-2 text-sm text-gray-600">
-                <li><a href="#features" className="hover:text-gray-900 transition">Features</a></li>
-                <li><a href="#how" className="hover:text-gray-900 transition">How it Works</a></li>
-                <li><a href="#impact" className="hover:text-gray-900 transition">Impact</a></li>
-              </ul>
-            </div>
-            <div>
-              <h4 className="font-semibold text-gray-900 mb-3">Portals</h4>
-              <ul className="space-y-2 text-sm text-gray-600">
-                <li><Link to="/reporter" className="hover:text-gray-900 transition">Report Crisis</Link></li>
-                <li><Link to="/agency" className="hover:text-gray-900 transition">Agency</Link></li>
-                <li><Link to="/" className="hover:text-gray-900 transition">Home</Link></li>
-              </ul>
-            </div>
-            <div>
-              <h4 className="font-semibold text-gray-900 mb-3">Legal</h4>
-              <ul className="space-y-2 text-sm text-gray-600">
-                <li><a href="#" className="hover:text-gray-900 transition">Privacy</a></li>
-                <li><a href="#" className="hover:text-gray-900 transition">Terms</a></li>
-                <li><a href="#" className="hover:text-gray-900 transition">Contact</a></li>
-              </ul>
-            </div>
-          </div>
-
-          <div className="border-t border-gray-200 pt-8 flex flex-col md:flex-row items-center justify-between text-sm text-gray-600">
-            <p>&copy; 2024 CrisisAlert. All rights reserved.</p>
-            <div className="flex items-center gap-4 mt-4 md:mt-0">
-              <a href="#" className="hover:text-gray-900 transition">Twitter</a>
-              <a href="#" className="hover:text-gray-900 transition">LinkedIn</a>
-              <a href="#" className="hover:text-gray-900 transition">GitHub</a>
-            </div>
-          </div>
-        </div>
-      </footer>
     </div>
   )
 }
