@@ -1,6 +1,6 @@
 import Resource from "../models/resource.model.js";
-import User from "../models/user.models.js";       // 👈 Added
-import Incident from "../models/incident.model.js"; // 👈 Added
+import User from "../models/user.models.js";
+import Incident from "../models/incident.model.js"; 
 
 // Create a new resource
 export const createResource = async (req, res) => {
