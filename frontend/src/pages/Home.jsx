@@ -232,28 +232,20 @@ const Home = () => {
           {/* Decorative Glow */}
           <div className="absolute top-0 right-0 w-64 h-64 bg-blue-500 blur-[100px] opacity-20 rounded-full pointer-events-none" />
           <div className="absolute bottom-0 left-0 w-64 h-64 bg-purple-500 blur-[100px] opacity-20 rounded-full pointer-events-none" />
-          <BackgroundRippleEffect />
           <h2 className="text-3xl md:text-5xl font-bold text-white mb-6 relative z-10">
             Ready to make a difference?
           </h2>
           <p className="text-zinc-400 max-w-2xl mx-auto mb-10 text-lg relative z-10">
-            Join the network of Citizens, Agencies, and Coordinators building a
-            safer tomorrow.
+            Join the network of Citizens, Agencies, and Coordinators building a safer tomorrow.
           </p>
 
           <div className="flex flex-col sm:flex-row justify-center gap-4 relative z-10">
             {!userData && (
-              <Link
-                to="/signup"
-                className="px-8 py-4 bg-white text-zinc-900 rounded-2xl font-bold hover:bg-zinc-100 transition-colors"
-              >
+              <Link to="/signup" className="px-8 py-4 bg-white text-zinc-900 rounded-2xl font-bold hover:bg-zinc-100 transition-colors">
                 Join as Citizen
               </Link>
             )}
-            <Link
-              to="/contact"
-              className="px-8 py-4 bg-zinc-800 text-white border border-zinc-700 rounded-2xl font-bold hover:bg-zinc-700 transition-colors"
-            >
+            <Link to="/contact" className="px-8 py-4 bg-zinc-800 text-white border border-zinc-700 rounded-2xl font-bold hover:bg-zinc-700 transition-colors">
               Contact Support
             </Link>
           </div>

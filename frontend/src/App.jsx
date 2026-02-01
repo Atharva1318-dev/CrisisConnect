@@ -59,18 +59,18 @@ const App = () => {
         {
           userData && userData.role === "citizen" && (
             <>
-              <Route path="/citizenhome" element={<Citizen />} />
+              <Route path="/citizen/dashboard" element={<Citizen />} />
               <Route path="/sos" element={<Sos />} />
               <Route path="/imagetext" element={<ImageTextInput />} />
               <Route path="/map" element={<Maps />} />
-              <Route path="/citizenown" element={<CitizenOwn />} />
+              <Route path="/citizenincidents" element={<CitizenOwn />} />
             </>
           )}
         {
           userData && userData.role === "agency" && (
             <>
-              <Route path="/agencyhome" element={<Agency />} />
-              <Route path="/agency/resources" element={<AnalyticsPage />} />
+              <Route path="/agency/dashboard" element={<Agency />} />
+              <Route path="/agency/analytics" element={<AnalyticsPage />} />
             </>
           )
         }

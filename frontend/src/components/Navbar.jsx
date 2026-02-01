@@ -30,16 +30,15 @@ const Navbar = () => {
     ];
   } else if (userData.role === "citizen") {
     navLinks = [
-      { name: "Dashboard", href: "/citizenhome", icon: <IoHomeOutline size={20} /> },
+      { name: "Dashboard", href: "/citizen/dashboard", icon: <IoHomeOutline size={20} /> },
       { name: "Report", href: "/sos", icon: <AlertCircle size={20} /> },
-      { name: "My Incidents", href: "/citizenown", icon: <IoListOutline size={20} /> },
+      { name: "My Incidents", href: "/citizenincidents", icon: <IoListOutline size={20} /> },
       { name: "Map", href: "/map", icon: <IoMapOutline size={20} /> },
     ];
   } else if (userData.role === "agency") {
     navLinks = [
-      { name: "Dashboard", href: "/agencyhome", icon: <IoHomeOutline size={20} /> },
-      { name: "Analytics", href: "/agency/resources", icon: <IoPeopleOutline size={20} /> },
-      { name: "Resources", href: "/agency/teams", icon: <IoMapOutline size={20} /> },
+      { name: "Dashboard", href: "/agency/dashboard", icon: <IoHomeOutline size={20} /> },
+      { name: "Analytics", href: "/agency/analytics", icon: <IoPeopleOutline size={20} /> },
     ];
   } else if (userData.role === "coordinator") {
     navLinks = [

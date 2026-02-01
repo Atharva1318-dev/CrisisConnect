@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState, useContext } from "react";
 import axios from "axios";
 import { AuthDataContext } from "../context/AuthDataContext";
@@ -80,9 +79,9 @@ const TacticalMap = ({ incidents }) => {
   const mapCenter =
     incidents.length > 0
       ? [
-          incidents[0].location.coordinates[1],
-          incidents[0].location.coordinates[0],
-        ]
+        incidents[0].location.coordinates[1],
+        incidents[0].location.coordinates[0],
+      ]
       : defaultCenter;
 
   return (
@@ -189,6 +188,8 @@ const Agency = () => {
   const [showDispatchModal, setShowDispatchModal] = useState(false);
   const [dispatchResources, setDispatchResources] = useState([]);
 
+  const [sentRequests, setSentRequests] = useState([]);
+
   const severityPreset = {
     Low: 1,
     Medium: 3,
@@ -224,18 +225,26 @@ const Agency = () => {
       });
 
       const all = res.data.incidents || [];
-      const pending = all
-        .filter((i) => i.status === "Pending")
+
+      // ✅ FIX: Include 'Active' so they don't disappear after Acknowledging
+      const visibleIncidents = all
+        .filter((i) => i.status === "Pending" || i.status === "Active")
         .sort((a, b) => {
-          const scoreA = typeof b.trustScore === 'object' ? b.trustScore.totalScore || 0 : b.trustScore || 0;
-          const scoreB = typeof a.trustScore === 'object' ? a.trustScore.totalScore || 0 : a.trustScore || 0;
-          return scoreA - scoreB;
+          // Sort Priority: Pending first, then Active
+          if (a.status === "Pending" && b.status !== "Pending") return -1;
+          if (a.status !== "Pending" && b.status === "Pending") return 1;
+
+          // Then by Trust Score
+          const scoreA = typeof a.trustScore === 'object' ? a.trustScore.totalScore || 0 : a.trustScore || 0;
+          const scoreB = typeof b.trustScore === 'object' ? b.trustScore.totalScore || 0 : b.trustScore || 0;
+          return scoreB - scoreA;
         });
 
       setAllIncidents(all);
-      setPendingIncidents(pending);
-      if (pending.length > 0 && !selectedIncident) {
-        setSelectedIncident(pending[0]);
+      setPendingIncidents(visibleIncidents); // Updates the Left Panel List
+
+      if (visibleIncidents.length > 0 && !selectedIncident) {
+        setSelectedIncident(visibleIncidents[0]);
       }
     } catch (err) {
       console.error("Fetch incidents error:", err);
@@ -244,8 +253,21 @@ const Agency = () => {
     }
   };
 
+  const fetchSentRequests = async () => {
+    try {
+      const res = await axios.get(`${serverUrl}/api/request/agency/list`, { withCredentials: true });
+      setSentRequests(res.data.requests);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   useEffect(() => {
     fetchIncidents();
+
+    fetchSentRequests();
+    const interval = setInterval(fetchSentRequests, 5000); // Poll for updates
+    return () => clearInterval(interval);
   }, [serverUrl]);
 
   const acceptIncident = async (id) => {
@@ -408,6 +430,38 @@ const Agency = () => {
           </div>
         </header>
 
+        {/* --- STATUS TRACKER PANEL --- */}
+        <div className="mb-8">
+          <h2 className="text-xl font-bold text-zinc-900 mb-4">Live Dispatch Status</h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {sentRequests.length === 0 ? (
+              <div className="col-span-3 p-4 bg-zinc-50 rounded-xl text-center text-zinc-400 text-sm">
+                No active dispatch requests.
+              </div>
+            ) : (
+              sentRequests.map(req => (
+                <div key={req._id} className="bg-white border border-zinc-200 p-4 rounded-xl shadow-sm">
+                  <div className="flex justify-between items-start mb-2">
+                    <span className={`px-2 py-0.5 rounded text-xs font-bold uppercase ${req.status === 'Accepted' ? 'bg-green-100 text-green-700' :
+                      req.status === 'Rejected' ? 'bg-red-100 text-red-700' :
+                        'bg-yellow-100 text-yellow-700'
+                      }`}>
+                      {req.status === 'Accepted' ? 'Deployed' : req.status}
+                    </span>
+                    <span className="text-xs text-zinc-400">{new Date(req.createdAt).toLocaleTimeString()}</span>
+                  </div>
+                  <p className="font-bold text-zinc-900 text-sm">
+                    {req.resourcesRequested.map(r => `${r.quantity} ${r.item_name}`).join(", ")}
+                  </p>
+                  <p className="text-xs text-zinc-500 mt-1">
+                    Coordinator: {req.coordinatorId?.name || "Unknown"}
+                  </p>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
         {/* Main Content Area */}
         <div className="flex-1 flex p-6 gap-6">
           {/* LEFT PANEL - Incident Queue */}
@@ -454,11 +508,10 @@ const Agency = () => {
                         <div
                           key={incident._id}
                           onClick={() => setSelectedIncident(incident)}
-                          className={`bg-white rounded-2xl border-2 p-5 cursor-pointer transition-all hover:shadow-lg ${
-                            selectedIncident?._id === incident._id
-                              ? "border-blue-500 bg-blue-50"
-                              : "border-gray-200 hover:border-gray-300"
-                          }`}
+                          className={`bg-white rounded-2xl border-2 p-5 cursor-pointer transition-all hover:shadow-lg ${selectedIncident?._id === incident._id
+                            ? "border-blue-500 bg-blue-50"
+                            : "border-gray-200 hover:border-gray-300"
+                            }`}
                         >
                           <div className="flex items-start justify-between mb-4">
                             <div className="flex items-center gap-4">
@@ -501,8 +554,8 @@ const Agency = () => {
                               </div>
                               <div className="px-4 py-2 bg-gray-100 rounded-lg">
                                 <span className="font-bold text-gray-900 text-xl">
-                                  {typeof incident.trustScore === 'object' 
-                                    ? incident.trustScore.totalScore || 'N/A' 
+                                  {typeof incident.trustScore === 'object'
+                                    ? incident.trustScore.totalScore || 'N/A'
                                     : incident.trustScore || 'N/A'}
                                 </span>
                                 <span className="text-gray-500">/100</span>
@@ -531,51 +584,9 @@ const Agency = () => {
                                 Live
                               </span>
                             </div>
-                            <div className="flex gap-3">
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  acceptIncident(incident._id);
-                                }}
-                                className="px-5 py-2.5 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-xl transition-all flex items-center gap-2 shadow-sm"
-                              >
-                                <svg
-                                  className="w-4 h-4"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  viewBox="0 0 24 24"
-                                >
-                                  <path
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    strokeWidth={2}
-                                    d="M5 13l4 4L19 7"
-                                  />
-                                </svg>
-                                Accept
-                              </button>
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  rejectIncident(incident._id);
-                                }}
-                                className="px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-xl transition-all flex items-center gap-2 shadow-sm"
-                              >
-                                <svg
-                                  className="w-4 h-4"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  viewBox="0 0 24 24"
-                                >
-                                  <path
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    strokeWidth={2}
-                                    d="M6 18L18 6M6 6l12 12"
-                                  />
-                                </svg>
-                                Reject
-                              </button>
+
+                            <div className="text-xs font-bold text-blue-600 bg-blue-50 px-3 py-1 rounded-full">
+                              Select to Manage →
                             </div>
                           </div>
                         </div>
@@ -649,8 +660,8 @@ const Agency = () => {
                       </span>
                       <div className="px-4 py-2 bg-gradient-to-r from-gray-50 to-gray-100 rounded-xl border border-gray-200">
                         <span className="font-bold text-gray-900 text-xl">
-                          {typeof selectedIncident.trustScore === 'object' 
-                            ? selectedIncident.trustScore.totalScore || 'N/A' 
+                          {typeof selectedIncident.trustScore === 'object'
+                            ? selectedIncident.trustScore.totalScore || 'N/A'
                             : selectedIncident.trustScore || 'N/A'}
                         </span>
                         <span className="text-gray-500">/100</span>
@@ -787,62 +798,43 @@ const Agency = () => {
                       </div>
                     )}
 
-                    <div className="pt-6 border-t border-gray-100 flex justify-end gap-4">
-                      <button
-                        onClick={() => rejectIncident(selectedIncident._id)}
-                        className="px-6 py-3 border border-gray-300 text-gray-700 hover:bg-gray-50 text-base font-medium rounded-xl transition-all flex items-center gap-2"
-                      >
-                        <svg
-                          className="w-5 h-5"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M6 18L18 6M6 6l12 12"
-                          />
-                        </svg>
-                        Mark as Spam
-                      </button>
+                    <div className="pt-6 border-t border-gray-100 flex justify-end gap-3">
+
+                      {/* LOGIC: Only show Spam/Acknowledge if it is still PENDING */}
+                      {selectedIncident.status === 'Pending' && (
+                        <>
+                          <button
+                            onClick={() => rejectIncident(selectedIncident._id)}
+                            className="px-4 py-3 border border-gray-300 text-gray-700 hover:bg-gray-50 text-sm font-bold rounded-xl transition-all flex items-center gap-2"
+                          >
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                            Spam
+                          </button>
+
+                          <button
+                            onClick={() => acceptIncident(selectedIncident._id)}
+                            className="px-4 py-3 border border-green-200 bg-green-50 text-green-700 hover:bg-green-100 text-sm font-bold rounded-xl transition-all flex items-center gap-2"
+                          >
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                            Acknowledge
+                          </button>
+                        </>
+                      )}
+
+                      {/* LOGIC: "Activate & Deploy" is always visible (even for Active incidents) */}
                       <button
                         onClick={() => {
-                          const qty =
-                            severityPreset[selectedIncident.severity] || 2;
-
+                          const qty = severityPreset[selectedIncident.severity] || 2;
                           setDispatchResources([
-                            {
-                              item_name: "Medical Kit",
-                              category: "Medical",
-                              quantity: qty,
-                            },
-                            {
-                              item_name: "Rescue Team",
-                              category: "Rescue",
-                              quantity: qty,
-                            },
+                            { item_name: "Medical Kit", category: "Medical", quantity: qty },
+                            { item_name: "Rescue Team", category: "Rescue", quantity: qty },
                           ]);
-
                           setShowDispatchModal(true);
                         }}
-                        className="px-6 py-3 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white text-base font-medium rounded-xl transition-all flex items-center gap-2 shadow-lg"
+                        className="px-6 py-3 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white text-sm font-bold rounded-xl transition-all flex items-center gap-2 shadow-lg"
                       >
-                        <svg
-                          className="w-5 h-5"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-                          />
-                        </svg>
-                        Activate & Deploy Response
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                        {selectedIncident.status === 'Active' ? 'Dispatch More Units' : 'Activate & Deploy'}
                       </button>
                     </div>
                   </div>
@@ -980,11 +972,10 @@ const Agency = () => {
                         <div
                           key={coord._id}
                           onClick={() => setSelectedCoordinator(coord)}
-                          className={`p-3 border rounded-xl cursor-pointer flex justify-between items-center transition-colors ${
-                            selectedCoordinator?._id === coord._id
-                              ? "border-blue-500 bg-blue-50"
-                              : "border-gray-200 hover:bg-gray-50"
-                          }`}
+                          className={`p-3 border rounded-xl cursor-pointer flex justify-between items-center transition-colors ${selectedCoordinator?._id === coord._id
+                            ? "border-blue-500 bg-blue-50"
+                            : "border-gray-200 hover:bg-gray-50"
+                            }`}
                         >
                           <div>
                             <p className="font-bold text-gray-900">
@@ -1011,11 +1002,10 @@ const Agency = () => {
                     <button
                       onClick={handleDispatch}
                       disabled={!selectedCoordinator}
-                      className={`px-4 py-2 rounded-lg text-white transition-opacity ${
-                        !selectedCoordinator
-                          ? "bg-gray-300 cursor-not-allowed"
-                          : "bg-green-600 hover:bg-green-700"
-                      }`}
+                      className={`px-4 py-2 rounded-lg text-white transition-opacity ${!selectedCoordinator
+                        ? "bg-gray-300 cursor-not-allowed"
+                        : "bg-green-600 hover:bg-green-700"
+                        }`}
                     >
                       Send Request
                     </button>
