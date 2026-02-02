@@ -136,6 +136,6 @@
     @apply bg-background text-foreground;
   }
   nav {
-    z-index: 9999 !important;
+    z-index: 1100 !important;
   }
 }
