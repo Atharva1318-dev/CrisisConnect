@@ -1,4 +1,5 @@
-import React, { useEffect, useState, useContext } from "react";
+
+import React, { useEffect, useState, useContext, useRef } from "react";
 import axios from "axios";
 import { AuthDataContext } from "../context/AuthDataContext";
 import {
@@ -8,14 +9,32 @@ import {
   Marker,
   LayersControl,
   useMap,
+  Polyline,
 } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
+import "leaflet.markercluster/dist/MarkerCluster.css";
+import "leaflet.markercluster/dist/MarkerCluster.Default.css";
 import MarkerClusterGroup from "react-leaflet-markercluster";
 import L from "leaflet";
+
+// ✅ MARKER ICONS
+import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
+import markerIcon from "leaflet/dist/images/marker-icon.png";
+import markerShadow from "leaflet/dist/images/marker-shadow.png";
+
 import greenflag from "../assets/greenflag.png";
 import redflag from "../assets/redflag.png";
 import yellowflag from "../assets/yellowflag.png";
 
+// ✅ FIX LEAFLET ICONS
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: markerIcon2x,
+  iconUrl: markerIcon,
+  shadowUrl: markerShadow,
+});
+
+// ✅ INCIDENT ICON
 const getStatusIcon = (status) => {
   let iconUrl = greenflag;
   let size = [40, 50];
@@ -46,130 +65,298 @@ const getStatusIcon = (status) => {
   });
 };
 
-const createCustomClusterIcon = (cluster) => {
+// ✅ RESOURCE ICON (COLORED BY CATEGORY)
+const getResourceIcon = (category) => {
+  const categoryMap = {
+    medical: { emoji: "🏥", color: "#ef4444" },
+    food: { emoji: "🍖", color: "#f59e0b" },
+    equipment: { emoji: "🔧", color: "#8b5cf6" },
+    shelter: { emoji: "🏠", color: "#10b981" },
+    rescue: { emoji: "🚑", color: "#dc2626" },
+    water: { emoji: "💧", color: "#06b6d4" },
+    fuel: { emoji: "⛽", color: "#f97316" },
+  };
+
+  const categoryLower = category?.toLowerCase();
+  const { emoji = "📦", color = "#3b82f6" } = categoryMap[categoryLower] || {};
+
   return L.divIcon({
-    html: `<div style="background-color: rgba(255, 0, 0, 0.7); border-radius: 50%; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 14px;">${cluster.getChildCount()}</div>`,
-    className: "custom-cluster-icon",
-    iconSize: [36, 36],
-    iconAnchor: [18, 18],
+    html: `<div style="background: linear-gradient(135deg, ${color} 0%, ${adjustBrightness(
+      color,
+      -20
+    )} 100%); border-radius: 50%; width: 45px; height: 45px; display: flex; align-items: center; justify-content: center; border: 3px solid white; box-shadow: 0 4px 12px rgba(0,0,0,0.2); font-size: 22px;">${emoji}</div>`,
+    className: "resource-icon",
+    iconSize: [45, 45],
+    iconAnchor: [22, 22],
+    popupAnchor: [0, -22],
   });
 };
 
-function FitBounds({ incidents }) {
+// ✅ CLUSTER ICON
+const createCustomClusterIcon = (cluster) => {
+  const count = cluster.getChildCount();
+  let bgColor = "#3b82f6";
+  let scale = 1;
+
+  if (count > 10) {
+    bgColor = "#dc2626";
+    scale = 1.3;
+  } else if (count > 5) {
+    bgColor = "#f59e0b";
+    scale = 1.15;
+  }
+
+  return L.divIcon({
+    html: `<div style="background: linear-gradient(135deg, ${bgColor} 0%, ${adjustBrightness(
+      bgColor,
+      -20
+    )} 100%); border-radius: 50%; width: ${40 * scale}px; height: ${40 * scale
+      }px; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: ${14 * scale
+      }px; border: 3px solid white; box-shadow: 0 4px 12px rgba(0,0,0,0.2);">${count}</div>`,
+    className: "custom-cluster-icon",
+    iconSize: [40 * scale, 40 * scale],
+    iconAnchor: [(40 * scale) / 2, (40 * scale) / 2],
+  });
+};
+
+// ✅ ADJUST COLOR BRIGHTNESS
+const adjustBrightness = (color, percent) => {
+  const num = parseInt(color.replace("#", ""), 16);
+  const amt = Math.round(2.55 * percent);
+  const R = (num >> 16) + amt;
+  const G = ((num >> 8) & 0x00ff) + amt;
+  const B = (num & 0x0000ff) + amt;
+  return (
+    "#" +
+    (
+      0x1000000 +
+      (R < 255 ? (R < 1 ? 0 : R) : 255) * 0x10000 +
+      (G < 255 ? (G < 1 ? 0 : G) : 255) * 0x100 +
+      (B < 255 ? (B < 1 ? 0 : B) : 255)
+    )
+      .toString(16)
+      .slice(1)
+  );
+};
+
+// ✅ MAP CONTROLLER - PREVENTS ZOOM ISSUES
+function MapController({ incidents, resources }) {
   const map = useMap();
+  const hasSetBounds = useRef(false);
+
   useEffect(() => {
-    if (!incidents || incidents.length === 0) return;
-    const bounds = L.latLngBounds(
-      incidents
-        .filter((inc) => inc.location?.coordinates)
-        .map((inc) => [
-          inc.location.coordinates[1],
-          inc.location.coordinates[0],
-        ])
-    );
-    if (bounds.isValid()) {
-      map.fitBounds(bounds, { padding: [50, 50] });
+    if (!hasSetBounds.current && (incidents?.length > 0 || resources?.length > 0)) {
+      const allCoords = [];
+
+      incidents?.forEach((inc) => {
+        if (inc.location?.coordinates?.[0] && inc.location?.coordinates?.[1]) {
+          allCoords.push([
+            inc.location.coordinates[1],
+            inc.location.coordinates[0],
+          ]);
+        }
+      });
+
+      resources?.forEach((res) => {
+        if (res.location?.coordinates?.[0] && res.location?.coordinates?.[1]) {
+          allCoords.push([
+            res.location.coordinates[1],
+            res.location.coordinates[0],
+          ]);
+        }
+      });
+
+      if (allCoords.length > 1) {
+        try {
+          const bounds = L.latLngBounds(allCoords);
+          map.fitBounds(bounds, {
+            padding: [100, 100],
+            maxZoom: 16,
+            animate: true,
+          });
+          hasSetBounds.current = true;
+        } catch (err) {
+          console.error("Bounds error:", err);
+        }
+      } else if (allCoords.length === 1) {
+        map.setView(allCoords[0], 15);
+        hasSetBounds.current = true;
+      }
     }
-  }, [incidents, map]);
+  }, []);
+
   return null;
 }
 
-const TacticalMap = ({ incidents }) => {
+// ✅ TACTICAL MAP WITH INCIDENTS & RESOURCES
+const TacticalMap = ({ incidents, resources }) => {
   const defaultCenter = [19.0760, 72.8777];
-  const mapCenter =
-    incidents.length > 0
-      ? [
-        incidents[0].location.coordinates[1],
-        incidents[0].location.coordinates[0],
-      ]
-      : defaultCenter;
 
   return (
     <MapContainer
-      center={mapCenter}
-      zoom={12}
+      center={defaultCenter}
+      zoom={13}
       scrollWheelZoom={true}
+      dragging={true}
       style={{ height: "100%", width: "100%" }}
+      zoomControl={false}
     >
-      <LayersControl position="topright">
-        <LayersControl.BaseLayer checked name="OpenStreetMap">
+      <LayersControl position="topright" collapsed={false}>
+        {/* BASE LAYERS */}
+        <LayersControl.BaseLayer checked name="🗺️ Standard">
           <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
         </LayersControl.BaseLayer>
 
-        <LayersControl.BaseLayer name="CartoDB Dark">
+        <LayersControl.BaseLayer name="🌙 Dark">
           <TileLayer
             attribution='&copy; <a href="https://carto.com/attributions">CARTO</a>'
             url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
           />
         </LayersControl.BaseLayer>
+
+
+        <LayersControl.BaseLayer name="🛰️ Satellite">
+          <TileLayer
+            attribution='&copy; <a href="https://www.esri.com/">Esri</a>'
+            url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+          />
+        </LayersControl.BaseLayer>
+
+        {/* INCIDENTS LAYER */}
+        <LayersControl.Overlay checked name="🚨 Incidents">
+          <MarkerClusterGroup
+            iconCreateFunction={createCustomClusterIcon}
+            maxClusterRadius={50}
+            disableClusteringAtZoom={16}
+          >
+            {incidents?.map((incident) => {
+              if (!incident.location?.coordinates?.[0]) return null;
+
+              const [lon, lat] = incident.location.coordinates;
+              return (
+                <Marker
+                  key={incident._id}
+                  position={[lat, lon]}
+                  icon={getStatusIcon(incident.status)}
+                >
+                  <Popup maxWidth={300} minWidth={250}>
+                    <div className="text-sm space-y-2">
+                      <div className="font-bold text-red-600 text-base">
+                        🚨 {incident.type}
+                      </div>
+                      <div className="border-t border-gray-300 pt-2 space-y-1">
+                        <div className="flex justify-between">
+                          <span className="font-semibold text-gray-700">
+                            Status:
+                          </span>
+                          <span
+                            className={`px-2 py-0.5 rounded text-xs font-bold ${incident.status === "Active"
+                              ? "bg-green-100 text-green-700"
+                              : incident.status === "Pending"
+                                ? "bg-yellow-100 text-yellow-700"
+                                : "bg-red-100 text-red-700"
+                              }`}
+                          >
+                            {incident.status}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="font-semibold text-gray-700">
+                            Severity:
+                          </span>
+                          <span className="font-bold text-red-600">
+                            {incident.severity}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="font-semibold text-gray-700">
+                            Trust:
+                          </span>
+                          <span className="font-bold text-blue-600">
+                            {typeof incident.trustScore === "object"
+                              ? incident.trustScore.totalScore || "N/A"
+                              : incident.trustScore || "N/A"}
+                            %
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </Popup>
+                </Marker>
+              );
+            })}
+          </MarkerClusterGroup>
+        </LayersControl.Overlay>
+
+        {/* RESOURCES LAYER */}
+        <LayersControl.Overlay checked name="📦 Resources">
+          <MarkerClusterGroup
+            iconCreateFunction={createCustomClusterIcon}
+            maxClusterRadius={50}
+            disableClusteringAtZoom={15}
+          >
+            {resources?.map((resource) => {
+              if (!resource.location?.coordinates?.[0]) return null;
+
+              const [lon, lat] = resource.location.coordinates;
+              return (
+                <Marker
+                  key={resource._id}
+                  position={[lat, lon]}
+                  icon={getResourceIcon(resource.category)}
+                >
+                  <Popup maxWidth={300} minWidth={260}>
+                    <div className="text-sm space-y-2">
+                      <div className="font-bold text-blue-600 text-base">
+                        📦 {resource.category}
+                      </div>
+                      <div className="border-t border-gray-300 pt-2 space-y-1">
+                        <div className="flex justify-between">
+                          <span className="font-semibold text-gray-700">
+                            Item:
+                          </span>
+                          <span className="font-bold text-gray-900">
+                            {resource.item_name}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="font-semibold text-gray-700">
+                            Qty:
+                          </span>
+                          <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded font-bold text-xs">
+                            ×{resource.quantity}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="font-semibold text-gray-700">
+                            Status:
+                          </span>
+                          <span
+                            className={`px-2 py-0.5 rounded text-xs font-bold ${resource.status === "Available"
+                              ? "bg-green-100 text-green-700"
+                              : "bg-gray-100 text-gray-700"
+                              }`}
+                          >
+                            {resource.status}
+                          </span>
+                        </div>
+                        <div className="text-xs text-gray-600">
+                          Owner: {resource.owner?.name || "Unknown"}
+                        </div>
+                      </div>
+                    </div>
+                  </Popup>
+                </Marker>
+              );
+            })}
+          </MarkerClusterGroup>
+        </LayersControl.Overlay>
       </LayersControl>
 
-      <MarkerClusterGroup iconCreateFunction={createCustomClusterIcon}>
-        {incidents.map((incident) => {
-          if (!incident.location || !incident.location.coordinates) {
-            return null;
-          }
-
-          const [lon, lat] = incident.location.coordinates;
-          const position = [lat, lon];
-
-          return (
-            <Marker
-              key={incident._id}
-              position={position}
-              icon={getStatusIcon(incident.status)}
-            >
-              <Popup>
-                <div style={{ minWidth: 200, fontSize: "13px" }}>
-                  <strong style={{ fontSize: "15px", color: "#d32f2f" }}>
-                    🚨 {incident.type}
-                  </strong>
-                  <hr style={{ margin: "8px 0" }} />
-                  <div style={{ marginBottom: "6px" }}>
-                    <strong>Status:</strong>{" "}
-                    <span
-                      style={{
-                        padding: "2px 8px",
-                        borderRadius: "4px",
-                        fontWeight: "600",
-                        backgroundColor:
-                          incident.status === "Active"
-                            ? "rgba(34, 197, 94, 0.2)"
-                            : incident.status === "Pending"
-                              ? "rgba(234, 179, 8, 0.2)"
-                              : incident.status === "Spam"
-                                ? "rgba(239, 68, 68, 0.2)"
-                                : "rgba(59, 130, 246, 0.2)",
-                        color:
-                          incident.status === "Active"
-                            ? "#16a34a"
-                            : incident.status === "Pending"
-                              ? "#b45309"
-                              : incident.status === "Spam"
-                                ? "#991b1b"
-                                : "#1e40af",
-                      }}
-                    >
-                      {incident.status}
-                    </span>
-                  </div>
-                  <div style={{ marginBottom: "6px" }}>
-                    <strong>Severity:</strong> {incident.severity}
-                  </div>
-                  <div>
-                    <strong>Trust:</strong> {typeof incident.trustScore === 'object' ? incident.trustScore.totalScore || 'N/A' : incident.trustScore || 'N/A'}%
-                  </div>
-                </div>
-              </Popup>
-            </Marker>
-          );
-        })}
-      </MarkerClusterGroup>
-
-      <FitBounds incidents={incidents} />
+      <MapController incidents={incidents} resources={resources} />
     </MapContainer>
   );
 };
@@ -431,7 +618,7 @@ const Agency = () => {
         </header>
 
         {/* --- STATUS TRACKER PANEL --- */}
-        <div className="mb-8">
+        <div className="mb-2 px-6 py-4">
           <h2 className="text-xl font-bold text-zinc-900 mb-4">Live Dispatch Status</h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {sentRequests.length === 0 ? (
