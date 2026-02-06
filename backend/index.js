@@ -8,13 +8,13 @@ import IncidentRouter from "./routes/incident.routes.js";
 import cookieParser from "cookie-parser";
 import NewsRouter from "./routes/new.routes.js";
 import ResourceRouter from "./routes/resource.routes.js";
-
+import { promises as dns } from 'dns';
 import RequestRouter from "./routes/request.routes.js";
 
 dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5000;
-
+dns.setServers(['8.8.8.8','8.8.4.4']);
 ConnectDB();
 
 app.use(express.json({ limit: "50mb" }));

@@ -11,6 +11,7 @@ import {
   getIncidentStats,
   getIncidentAnalytics,
   dispatchIncident,
+  createIncidentDemo
 } from "../controller/incident.controller.js";
 import isAuth from "../middleware/auth.middleware.js";
 
@@ -25,7 +26,7 @@ IncidentRouter.get("/analytics", getIncidentAnalytics);
 
 // Create (protected) - supports multipart image upload field name "image"
 IncidentRouter.post("/create", isAuth, upload.single("image"), createIncident);
-
+IncidentRouter.post("/createdemo", upload.single("image"), createIncidentDemo);
 // List
 IncidentRouter.get("/list", getIncidents);
 

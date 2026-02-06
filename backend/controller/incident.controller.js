@@ -1604,6 +1604,391 @@ export const dispatchIncident = async (req, res) => {
   }
 };
 
+/**
+ * ==================== DEMO/EXPO HANDLER: CREATE INCIDENT ====================
+ * No authentication required - uses x-demo-user header
+ */
+/**
+ * ==================== DEMO/EXPO HANDLER: CREATE INCIDENT ====================
+ * No authentication required - uses x-demo-user header
+ * Extracts phone from User DB if email exists
+ */
+export const createIncidentDemo = async (req, res) => {
+  const verificationLog = [];
+
+  try {
+    console.log("\n\n" + "█".repeat(70));
+    console.log("█ 🚨 EXPO DEMO INCIDENT REPORT - 5 PHASE PIPELINE");
+    console.log("█".repeat(70));
+
+    // Get demo user email from header
+    const demoUserEmail = req.headers['x-demo-user'] || 'demo@crisis-connect.app';
+    console.log(`👤 Demo User Email: ${demoUserEmail}`);
+
+    const {
+      mode,
+      type,
+      description,
+      transcript,
+      imageBase64,
+      latitude,
+      longitude,
+      severity,
+      language,
+    } = req.body;
+
+    // ==================== VALIDATION ====================
+    if (!mode || !["VOICE", "IMAGE_TEXT", "SHAKE_HYBRID"].includes(mode)) {
+      return res.status(400).json({
+        message: "mode must be VOICE, IMAGE_TEXT, or SHAKE_HYBRID",
+      });
+    }
+
+    if (typeof latitude === "undefined" || typeof longitude === "undefined") {
+      return res.status(400).json({
+        message: "latitude and longitude are required"
+      });
+    }
+
+    // Mode-specific validation
+    if (mode === "VOICE" && !transcript) {
+      return res.status(400).json({
+        message: "transcript is required for VOICE mode",
+      });
+    }
+
+    if (mode === "IMAGE_TEXT" && !imageBase64 && !req.file) {
+      return res.status(400).json({
+        message: "imageBase64 or image file is required for IMAGE_TEXT mode",
+      });
+    }
+
+    if (mode === "SHAKE_HYBRID" && !imageBase64 && !req.file) {
+      return res.status(400).json({
+        message: "imageBase64 or image file is required for SHAKE_HYBRID mode",
+      });
+    }
+
+    // ==================== PARSE IMAGE FILE ====================
+    let imageBuffer = null;
+    let cleanImageBase64 = null;
+
+    // From multipart upload (via multer middleware)
+    if (req.file) {
+      imageBuffer = await fs.promises.readFile(req.file.path);
+      cleanImageBase64 = imageBuffer.toString("base64");
+      await fs.promises.unlink(req.file.path).catch(() => { });
+      console.log("📸 Image from multipart upload");
+    }
+    // From JSON base64
+    else if (imageBase64) {
+      const cleaned = (imageBase64 || "").replace(/^data:.*;base64,/, "");
+      imageBuffer = Buffer.from(cleaned, "base64");
+      cleanImageBase64 = cleaned;
+      console.log("📸 Image from base64 payload");
+    }
+
+    // ==================== PHASE 1: FORENSICS ====================
+    console.log("\n" + "█".repeat(70));
+    console.log("█ PHASE 1: FORENSICS");
+    console.log("█".repeat(70));
+
+    let forensics = {
+      realismFactor: 1.0,
+      isFake: false,
+      confidenceScore: 0,
+      isPocket: false,
+      verdict: "Analysis pending",
+    };
+
+    // Only run forensics if image exists
+    if (imageBuffer) {
+      forensics = await analyzeForensics(imageBuffer, mode, cleanImageBase64);
+      verificationLog.push({
+        phase: "forensics",
+        timestamp: new Date(),
+        result: forensics,
+      });
+
+      // 🚨 HARD REJECT IF DEEPFAKE
+      if (forensics.isFake) {
+        console.log("\n🚨 DEEPFAKE DETECTED - REJECTING INCIDENT");
+        return res.status(400).json({
+          message: "🚨 Image failed authenticity verification",
+          details: "This image appears to be AI-generated or manipulated",
+          verdict: forensics.verdict,
+          forensics: {
+            realismFactor: forensics.realismFactor,
+            confidenceScore: forensics.confidenceScore,
+            indicators: forensics.deepfakeIndicators,
+          },
+        });
+      }
+    } else if (mode !== "VOICE") {
+      console.log("⚠️ No image provided, skipping forensics");
+    }
+
+    // ==================== PHASE 2-3: AI ANALYSIS ====================
+    console.log("\n" + "█".repeat(70));
+    console.log("█ PHASE 2-3: AI ANALYSIS");
+    console.log("█".repeat(70));
+
+    let visionAnalysis = {
+      detected: [],
+      emergency_detected: [],
+      severity: "Unknown",
+      peopleCount: 0,
+      confidence: 0,
+      isReal: true,
+      model: "None",
+    };
+
+    let voiceAnalysis = {
+      keywords: [],
+      sentiment: "neutral",
+      urgency: 5,
+      confidence: 0,
+      model: "None",
+    };
+
+    let semantics = { alignmentScore: 50 };
+
+    try {
+      const analysisPromises = [];
+
+      // Vision: Only if image exists
+      if (imageBuffer && (mode === "IMAGE_TEXT" || mode === "SHAKE_HYBRID")) {
+        const base64Image = cleanImageBase64 || imageBuffer.toString("base64");
+        analysisPromises.push(
+          analyzeVision(base64Image)
+            .then((result) => {
+              visionAnalysis = result || visionAnalysis;
+              console.log("✅ Vision analysis complete");
+              console.log(`   Emergency Objects: ${(result?.emergency_detected || []).join(", ") || "None"}`);
+              console.log(`   Severity: ${result?.severity || "Unknown"}`);
+            })
+            .catch((err) => {
+              console.error("⚠️ Vision error:", err.message);
+            })
+        );
+      }
+
+      // Voice: Only if transcript exists
+      if (transcript && (mode === "VOICE" || mode === "IMAGE_TEXT" || mode === "SHAKE_HYBRID")) {
+        analysisPromises.push(
+          analyzeVoice(transcript)
+            .then((result) => {
+              voiceAnalysis = result || voiceAnalysis;
+              console.log("✅ Voice analysis complete");
+              console.log(`   Keywords: ${(result?.keywords || []).join(", ") || "None"}`);
+              console.log(`   Urgency: ${result?.urgency || 5}`);
+            })
+            .catch((err) => {
+              console.error("⚠️ Voice error:", err.message);
+            })
+        );
+      }
+
+      await Promise.all(analysisPromises);
+
+      // Semantic alignment: Only if both exist
+      if (imageBuffer && transcript) {
+        semantics = analyzeSemantics(visionAnalysis, voiceAnalysis);
+        console.log("✅ Semantics analysis complete");
+        console.log(`   Alignment Score: ${semantics.alignmentScore}`);
+      }
+
+      verificationLog.push({
+        phase: "ai_analysis",
+        timestamp: new Date(),
+        result: { visionAnalysis, voiceAnalysis, semantics },
+      });
+    } catch (err) {
+      console.error("⚠️ AI analysis error:", err.message);
+    }
+
+    // ==================== PHASE 4: SCORING ====================
+    console.log("\n" + "█".repeat(70));
+    console.log("█ PHASE 4: SCORING");
+    console.log("█".repeat(70));
+
+    let trustScoreData = {
+      totalScore: 50,
+      formula: "UNKNOWN",
+      breakdown: {},
+      locationConsensus: { score: 0 },
+    };
+
+    try {
+      trustScoreData = await calculateTrustScore(
+        mode,
+        forensics,
+        visionAnalysis,
+        voiceAnalysis,
+        semantics,
+        Number(latitude),
+        Number(longitude)
+      );
+    } catch (err) {
+      console.error("⚠️ Scoring error:", err.message);
+    }
+
+    verificationLog.push({
+      phase: "scoring",
+      timestamp: new Date(),
+      result: trustScoreData,
+    });
+
+    // ==================== PHASE 5: PRIORITY CODING ====================
+    console.log("\n" + "█".repeat(70));
+    console.log("█ PHASE 5: PRIORITY CODING");
+    console.log("█".repeat(70));
+
+    let priorityCode = {
+      code: "ALPHA",
+      description: "Standard incident",
+      dispatchLevel: 2,
+      autoDispatch: false,
+    };
+
+    try {
+      priorityCode = await determinePriorityCode(
+        trustScoreData,
+        forensics,
+        voiceAnalysis,
+        visionAnalysis,
+        trustScoreData.locationConsensus,
+        Number(latitude),
+        Number(longitude)
+      );
+    } catch (err) {
+      console.error("⚠️ Priority coding error:", err.message);
+    }
+
+    verificationLog.push({
+      phase: "priority_coding",
+      timestamp: new Date(),
+      result: priorityCode,
+    });
+
+    // ==================== UPLOAD IMAGE TO CLOUDINARY ====================
+    let imageUrl = null;
+
+    if (imageBuffer && cleanImageBase64) {
+      try {
+        const dataUri = `data:image/jpeg;base64,${cleanImageBase64}`;
+        const upload = await cloudinary.uploader.upload(dataUri, {
+          folder: "crisis_connect/incidents/demo",
+          timeout: 60000,
+        });
+        imageUrl = upload.secure_url;
+        console.log("✅ Image uploaded to Cloudinary");
+      } catch (err) {
+        console.error("⚠️ Image upload error:", err.message);
+      }
+    }
+
+    // ==================== AUTO-DETECT INCIDENT TYPE ====================
+    let detectedType = type || "Other";
+
+    if (!type || type === "Other") {
+      detectedType = detectIncidentType(visionAnalysis, voiceAnalysis);
+      console.log(`\n🔍 AUTO-DETECTED TYPE: ${detectedType}`);
+    }
+
+    // ==================== FIND EXISTING USER BY EMAIL ====================
+    // ✅ FIX: Look for user with matching email - if found, use their phone
+    let demoUser = await User.findOne({ email: demoUserEmail });
+    
+    if (!demoUser) {
+      // User doesn't exist - create temporary demo user
+      demoUser = new User({
+        name: "Expo Demo User",
+        email: demoUserEmail,
+        phone: "+1-DEMO-000", // Placeholder phone
+        role: "citizen",
+        isDemo: true,
+        password: "demo_no_auth",
+      });
+      await demoUser.save();
+      console.log(`✅ Demo user created: ${demoUserEmail}`);
+    } else {
+      // User exists - use their phone from DB
+      console.log(`✅ User found: ${demoUser.email} | Phone: ${demoUser.phone}`);
+    }
+
+    // ==================== SAVE INCIDENT TO DATABASE ====================
+    const incidentData = {
+      type: detectedType,
+      description: description || transcript || "",
+      severity: severity || "Medium",
+      mode,
+      transcript: transcript || undefined,
+      language: language || "en",
+      imageUrl,
+      location: {
+        type: "Point",
+        coordinates: [Number(longitude), Number(latitude)],
+      },
+      reportedBy: demoUser._id,
+      forensics,
+      aiAnalysis: {
+        vision: visionAnalysis,
+        voice: voiceAnalysis,
+        semantics,
+      },
+      trustScore: {
+        totalScore: trustScoreData.totalScore,
+        formula: trustScoreData.formula,
+        breakdown: trustScoreData.breakdown,
+        locationConsensus: trustScoreData.locationConsensus,
+      },
+      priorityCode,
+      status: priorityCode.code === "X-RAY" || forensics.isFake ? "Spam" : "Pending",
+      verificationLog,
+    };
+
+    const incident = new Incident(incidentData);
+    await incident.save();
+    await incident.populate("reportedBy", "name email phone role");
+
+    console.log("\n✅ DEMO INCIDENT CREATED SUCCESSFULLY");
+    console.log("█ ID:", incident._id);
+    console.log("█ Priority Code:", priorityCode.code);
+    console.log("█ Trust Score:", trustScoreData.totalScore.toFixed(0));
+    console.log("█ Status:", incidentData.status);
+    console.log("█ Type:", incidentData.type);
+    console.log("█ Mode:", mode);
+    console.log("█ Reporter Email:", demoUserEmail);
+    console.log("█ Reporter Phone:", demoUser.phone);
+    console.log("█".repeat(70) + "\n");
+
+    return res.status(201).json({
+      message: "✅ Demo incident created successfully",
+      incident,
+      priorityCode,
+      trustScore: trustScoreData.totalScore,
+      demoUser: {
+        id: demoUser._id,
+        email: demoUser.email,
+        name: demoUser.name,
+        phone: demoUser.phone, // ✅ Include phone in response
+      },
+    });
+  } catch (err) {
+    console.error("❌ createIncidentDemo error:", err.message);
+    console.error("Stack:", err.stack);
+    return res.status(500).json({
+      message: "Internal server error",
+      error: process.env.NODE_ENV === "development" ? err.message : "Server error",
+    });
+  }
+};
+
+// ...existing code...
+
+// ...existing code...
+
 export default {
   createIncident,
   getIncidents,
@@ -1615,4 +2000,5 @@ export default {
   getIncidentStats,
   getIncidentAnalytics,
   dispatchIncident,
+  createIncidentDemo,
 };
