@@ -397,6 +397,11 @@ const Agency = () => {
   const [sentRequests, setSentRequests] = useState([]);
   const [mapZoomTarget, setMapZoomTarget] = useState(null);
 
+  // ✅ GROUPED INCIDENTS VIEW
+  const [viewMode, setViewMode] = useState("list"); // "list" or "grouped"
+  const [groupedIncidents, setGroupedIncidents] = useState([]);
+  const [groupingRadius, setGroupingRadius] = useState(100); // meters
+
   const severityPreset = {
     Low: 1,
     Medium: 3,
@@ -513,6 +518,64 @@ const Agency = () => {
       }
     } catch (err) {
       console.error("Fetch incidents error:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ✅ FETCH GROUPED INCIDENTS BY LOCATION & TYPE
+  const fetchGroupedIncidents = async () => {
+    try {
+      setLoading(true);
+      // Calculate center of all incidents
+      const activeIncidents = allIncidents.filter((i) => i.location?.coordinates);
+      if (activeIncidents.length === 0) {
+        console.log("❌ No incidents with location coordinates found");
+        toast.error("No incidents with valid location data to group");
+        setGroupedIncidents([]);
+        return;
+      }
+
+      const centerLat =
+        activeIncidents.reduce((sum, inc) => sum + inc.location.coordinates[1], 0) / activeIncidents.length;
+      const centerLon =
+        activeIncidents.reduce((sum, inc) => sum + inc.location.coordinates[0], 0) / activeIncidents.length;
+
+      console.log(`📍 GROUPED VIEW REQUEST:`);
+      console.log(`   📋 Total incidents in list view: ${allIncidents.length}`);
+      console.log(`   ✅ Incidents with valid coordinates: ${activeIncidents.length}`);
+      console.log(`   📍 Center calculated: (${centerLat.toFixed(4)}, ${centerLon.toFixed(4)})`);
+      console.log(`   📏 Search radius: ${groupingRadius}m`);
+      console.log(`   🔗 API call: ${serverUrl}/api/incident/group?latitude=${centerLat}&longitude=${centerLon}&radius=${groupingRadius}`);
+
+      const res = await axios.get(
+        `${serverUrl}/api/incident/group?latitude=${centerLat}&longitude=${centerLon}&radius=${groupingRadius}`,
+        { withCredentials: true }
+      );
+
+      console.log("✅ Grouped incidents response:", res.data);
+
+      // Process grouped results - backend returns data.groupedIncidents
+      const grouped = res.data.data?.groupedIncidents || [];
+      console.log(`   📊 Groups returned: ${grouped.length}`);
+
+      const processed = grouped.map((typeGroup) => ({
+        ...typeGroup,
+        clusters: (typeGroup.clusters || []).map((cluster) => ({
+          ...cluster,
+          // Sort incidents within cluster by creation date (newest first)
+          incidents: (cluster.incidents || []).sort(
+            (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
+          ),
+        })),
+      }));
+
+      setGroupedIncidents(processed);
+      console.log("✅ Processed grouped incidents:", processed);
+    } catch (err) {
+      console.error("❌ Fetch grouped incidents error:", err);
+      console.error("   Error response:", err.response?.data);
+      toast.error("Failed to load grouped incidents: " + (err.response?.data?.message || err.message));
     } finally {
       setLoading(false);
     }
@@ -760,7 +823,7 @@ const Agency = () => {
           <div className={`w-[40%] h-[1320px] flex flex-col ${showDispatchModal ? 'pointer-events-none opacity-50' : ''}`}>
             <div className="bg-white rounded-2xl shadow-lg border border-gray-200 overflow-hidden flex flex-col h-full">
               <div className="p-6 border-b border-gray-100 flex-shrink-0">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between mb-4">
                   <div>
                     <h2 className="text-2xl font-bold text-gray-900">
                       Triage Queue
@@ -769,136 +832,282 @@ const Agency = () => {
                       Review and prioritize incoming incidents
                     </p>
                   </div>
-                  {/* <div className="flex items-center gap-2">
-                    <div className="px-3 py-1.5 bg-yellow-50 text-yellow-700 rounded-full text-xs font-medium border border-yellow-200">
-                      {pendingIncidents.filter(i => i.status === "Pending").length} pending (all-time)
+                </div>
+                {/* VIEW MODE TOGGLE */}
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => setViewMode("list")}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${viewMode === "list"
+                      ? "bg-blue-500 text-white shadow-md"
+                      : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                      }`}
+                  >
+                    📋 List View
+                  </button>
+                  <button
+                    onClick={() => {
+                      setViewMode("grouped");
+                      fetchGroupedIncidents();
+                    }}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${viewMode === "grouped"
+                      ? "bg-blue-500 text-white shadow-md"
+                      : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                      }`}
+                  >
+                    🗺️ Grouped View
+                  </button>
+                  {viewMode === "grouped" && (
+                    <div className="ml-auto flex items-center gap-2">
+                      <label className="text-xs text-gray-600 font-medium">Radius (m):</label>
+                      <input
+                        type="number"
+                        value={groupingRadius}
+                        onChange={(e) => setGroupingRadius(Math.max(10, Number(e.target.value) || 100))}
+                        className="w-16 px-2 py-1 border border-gray-300 rounded text-sm"
+                        min="10"
+                        max="1000"
+                      />
                     </div>
-                    <div className="px-3 py-1.5 bg-green-50 text-green-700 rounded-full text-xs font-medium border border-green-200">
-                      {pendingIncidents.filter(i => i.status === "Active").length} active
-                    </div>
-                  </div> */}
+                  )}
                 </div>
               </div>
 
               <div className="flex-1 overflow-y-auto">
                 <div className="p-6">
-                  {loading ? (
-                    <div className="flex flex-col items-center justify-center py-24">
-                      <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600 mb-4"></div>
-                      <p className="text-gray-500 text-lg">Loading incidents...</p>
-                    </div>
-                  ) : pendingIncidents.length === 0 ? (
-                    <div className="text-center py-24">
-                      <div className="w-24 h-24 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
-                        <span className="text-4xl">🎉</span>
-                      </div>
-                      <h3 className="text-xl font-semibold text-green-700 mb-3">
-                        All Clear!
-                      </h3>
-                      <p className="text-gray-600 text-lg">
-                        No pending incidents at the moment
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      {pendingIncidents.map((incident) => (
-                        <div
-                          key={incident._id}
-                          onClick={() => setSelectedIncident(incident)}
-                          className={`bg-white rounded-2xl border-2 p-5 cursor-pointer transition-all hover:shadow-lg ${selectedIncident?._id === incident._id
-                            ? "border-blue-500 bg-blue-50"
-                            : "border-gray-200 hover:border-gray-300"
-                            }`}
-                        >
-                          <div className="flex items-start justify-between mb-4">
-                            <div className="flex items-center gap-4">
-                              <div
-                                className={`p-3 rounded-xl ${getSeverityColor(
-                                  incident.severity
-                                )}`}
-                              >
-                                <span className="text-2xl">
-                                  {getTypeIcon(incident.type)}
-                                </span>
-                              </div>
-                              <div>
-                                <h3 className="font-bold text-gray-900 text-lg">
-                                  {incident.type}
-                                </h3>
-                                <div className="flex items-center gap-3 mt-2">
-                                  <span
-                                    className={`px-3 py-1.5 rounded-full text-sm font-medium ${getSeverityColor(
+                  {viewMode === "list" ? (
+                    /* LIST VIEW */
+                    <>
+                      {loading ? (
+                        <div className="flex flex-col items-center justify-center py-24">
+                          <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600 mb-4"></div>
+                          <p className="text-gray-500 text-lg">Loading incidents...</p>
+                        </div>
+                      ) : pendingIncidents.length === 0 ? (
+                        <div className="text-center py-24">
+                          <div className="w-24 h-24 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
+                            <span className="text-4xl">🎉</span>
+                          </div>
+                          <h3 className="text-xl font-semibold text-green-700 mb-3">
+                            All Clear!
+                          </h3>
+                          <p className="text-gray-600 text-lg">
+                            No pending incidents at the moment
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="space-y-4">
+                          {pendingIncidents.map((incident) => (
+                            <div
+                              key={incident._id}
+                              onClick={() => setSelectedIncident(incident)}
+                              className={`bg-white rounded-2xl border-2 p-5 cursor-pointer transition-all hover:shadow-lg ${selectedIncident?._id === incident._id
+                                ? "border-blue-500 bg-blue-50"
+                                : "border-gray-200 hover:border-gray-300"
+                                }`}
+                            >
+                              <div className="flex items-start justify-between mb-4">
+                                <div className="flex items-center gap-4">
+                                  <div
+                                    className={`p-3 rounded-xl ${getSeverityColor(
                                       incident.severity
                                     )}`}
                                   >
-                                    {incident.severity}
-                                  </span>
-                                  <span className="text-sm text-gray-500">•</span>
-                                  <span className="text-sm text-gray-500 flex items-center gap-1">
-                                    <span>{getModeIcon(incident.mode)}</span>
-                                    <span>
-                                      {incident.mode === "IMAGE_TEXT"
-                                        ? "Image Report"
-                                        : "Voice Report"}
+                                    <span className="text-2xl">
+                                      {getTypeIcon(incident.type)}
                                     </span>
+                                  </div>
+                                  <div>
+                                    <h3 className="font-bold text-gray-900 text-lg">
+                                      {incident.type}
+                                    </h3>
+                                    <div className="flex items-center gap-3 mt-2">
+                                      <span
+                                        className={`px-3 py-1.5 rounded-full text-sm font-medium ${getSeverityColor(
+                                          incident.severity
+                                        )}`}
+                                      >
+                                        {incident.severity}
+                                      </span>
+                                      <span className="text-sm text-gray-500">•</span>
+                                      <span className="text-sm text-gray-500 flex items-center gap-1">
+                                        <span>{getModeIcon(incident.mode)}</span>
+                                        <span>
+                                          {incident.mode === "IMAGE_TEXT"
+                                            ? "Image Report"
+                                            : "Voice Report"}
+                                        </span>
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="text-right">
+                                  <div className="text-sm text-gray-500 mb-1">
+                                    Trust Score
+                                  </div>
+                                  <div className="px-4 py-2 bg-gray-100 rounded-lg">
+                                    <span className="font-bold text-gray-900 text-xl">
+                                      {typeof incident.trustScore === 'object'
+                                        ? incident.trustScore.totalScore || 'N/A'
+                                        : incident.trustScore || 'N/A'}
+                                    </span>
+                                    <span className="text-gray-500">/100</span>
+                                  </div>
+                                </div>
+                              </div>
+                              {incident.mode === "VOICE" && (
+                                <div className="mt-4 p-4 bg-gray-50 rounded-xl text-gray-700 line-clamp-3">
+                                  <p className="text-sm">{incident.transcript}</p>
+                                </div>
+                              )}
+
+                              <div className="flex items-center justify-between mt-6">
+                                <div className="flex flex-col gap-1">
+                                  <span className="text-xs text-gray-400 font-medium">
+                                    {new Date(incident.createdAt).toLocaleDateString('en-US', {
+                                      month: 'short',
+                                      day: 'numeric',
+                                      year: 'numeric'
+                                    })}
                                   </span>
+                                  <div className="flex items-center gap-3">
+                                    <span className="text-sm font-semibold text-gray-700">
+                                      {new Date(
+                                        incident.createdAt
+                                      ).toLocaleTimeString([], {
+                                        hour: "2-digit",
+                                        minute: "2-digit",
+                                        hour12: true
+                                      })}
+                                    </span>
+                                    <span className="w-3 h-3 bg-green-500 rounded-full"></span>
+                                    <span className="text-sm text-green-600 font-medium">
+                                      Live
+                                    </span>
+                                  </div>
+                                </div>
+
+                                <div className="text-xs font-bold text-blue-600 bg-blue-50 px-3 py-1 rounded-full">
+                                  Select to Manage →
                                 </div>
                               </div>
                             </div>
-                            <div className="text-right">
-                              <div className="text-sm text-gray-500 mb-1">
-                                Trust Score
-                              </div>
-                              <div className="px-4 py-2 bg-gray-100 rounded-lg">
-                                <span className="font-bold text-gray-900 text-xl">
-                                  {typeof incident.trustScore === 'object'
-                                    ? incident.trustScore.totalScore || 'N/A'
-                                    : incident.trustScore || 'N/A'}
-                                </span>
-                                <span className="text-gray-500">/100</span>
-                              </div>
-                            </div>
-                          </div>
-
-                          {incident.mode === "VOICE" && (
-                            <div className="mt-4 p-4 bg-gray-50 rounded-xl text-gray-700 line-clamp-3">
-                              <p className="text-sm">{incident.transcript}</p>
-                            </div>
-                          )}
-
-                          <div className="flex items-center justify-between mt-6">
-                            <div className="flex flex-col gap-1">
-                              <span className="text-xs text-gray-400 font-medium">
-                                {new Date(incident.createdAt).toLocaleDateString('en-US', {
-                                  month: 'short',
-                                  day: 'numeric',
-                                  year: 'numeric'
-                                })}
-                              </span>
-                              <div className="flex items-center gap-3">
-                                <span className="text-sm font-semibold text-gray-700">
-                                  {new Date(
-                                    incident.createdAt
-                                  ).toLocaleTimeString([], {
-                                    hour: "2-digit",
-                                    minute: "2-digit",
-                                    hour12: true
-                                  })}
-                                </span>
-                                <span className="w-3 h-3 bg-green-500 rounded-full"></span>
-                                <span className="text-sm text-green-600 font-medium">
-                                  Live
-                                </span>
-                              </div>
-                            </div>
-
-                            <div className="text-xs font-bold text-blue-600 bg-blue-50 px-3 py-1 rounded-full">
-                              Select to Manage →
-                            </div>
-                          </div>
+                          ))}
                         </div>
-                      ))}
-                    </div>
+                      )}
+                    </>
+                  ) : (
+                    /* GROUPED VIEW */
+                    <>
+                      {loading ? (
+                        <div className="flex flex-col items-center justify-center py-24">
+                          <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600 mb-4"></div>
+                          <p className="text-gray-500 text-lg">Grouping incidents...</p>
+                        </div>
+                      ) : groupedIncidents.length === 0 ? (
+                        <div className="text-center py-24">
+                          <div className="w-24 h-24 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-6">
+                            <span className="text-4xl">🔍</span>
+                          </div>
+                          <h3 className="text-xl font-semibold text-blue-700 mb-3">
+                            No Grouped Incidents
+                          </h3>
+                          <p className="text-gray-600 text-lg">
+                            No incidents found in the current grouping radius
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="space-y-6">
+                          {groupedIncidents.map((typeGroup) => (
+                            <div key={typeGroup.type} className="border-l-4 border-blue-500 pl-4">
+                              <div className="flex items-center gap-3 mb-3">
+                                <span className="text-3xl">{getTypeIcon(typeGroup.type)}</span>
+                                <div>
+                                  <h3 className="text-lg font-bold text-gray-900">
+                                    {typeGroup.type}
+                                  </h3>
+                                  <p className="text-xs text-gray-500">
+                                    {typeGroup.totalCount} incidents • {typeGroup.clusters?.length || 0} cluster{typeGroup.clusters?.length !== 1 ? 's' : ''}
+                                  </p>
+                                </div>
+                              </div>
+
+                              <div className="space-y-3">
+                                {typeGroup.clusters?.map((cluster, clusterIdx) => (
+                                  <div key={`${typeGroup.type}-${clusterIdx}`} className="bg-gray-50 rounded-xl p-4 border border-gray-200">
+                                    <div className="flex items-center justify-between mb-3">
+                                      <div className="flex items-center gap-2">
+                                        <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-bold">
+                                          {cluster.count} incident{cluster.count !== 1 ? 's' : ''}
+                                        </span>
+                                        {cluster.isDuplicate && (
+                                          <span className="px-2 py-1 bg-red-100 text-red-700 rounded text-xs font-bold flex items-center gap-1">
+                                            ⚠️ Duplicate
+                                          </span>
+                                        )}
+                                        <span className="text-xs text-gray-500">
+                                          📍 ({Number(cluster.centerLocation.latitude).toFixed(4)}, {Number(cluster.centerLocation.longitude).toFixed(4)})
+                                        </span>
+                                      </div>
+                                    </div>
+
+                                    <div className="space-y-2">
+                                      {cluster.incidents?.map((incident, incIdx) => (
+                                        <div
+                                          key={incident._id}
+                                          onClick={() => setSelectedIncident(incident)}
+                                          className={`p-3 bg-white rounded-lg border-2 cursor-pointer transition-all hover:shadow-md ${selectedIncident?._id === incident._id
+                                            ? "border-blue-500 bg-blue-50"
+                                            : "border-gray-200 hover:border-gray-300"
+                                            }`}
+                                        >
+                                          <div className="flex items-center justify-between gap-2">
+                                            <div className="flex-1">
+                                              <div className="flex items-center gap-2">
+                                                <span
+                                                  className={`px-2 py-0.5 rounded text-xs font-bold ${getSeverityColor(incident.severity)}`}
+                                                >
+                                                  {incident.severity}
+                                                </span>
+                                                <span className="text-xs font-semibold text-gray-900">
+                                                  {new Date(incident.createdAt).toLocaleTimeString([], {
+                                                    hour: "2-digit",
+                                                    minute: "2-digit",
+                                                    hour12: true
+                                                  })}
+                                                </span>
+                                                <span className={`px-2 py-0.5 rounded text-xs font-bold ${incident.status === "Resolved"
+                                                  ? "bg-green-100 text-green-700"
+                                                  : incident.status === "Active"
+                                                    ? "bg-blue-100 text-blue-700"
+                                                    : "bg-yellow-100 text-yellow-700"
+                                                  }`}>
+                                                  {incident.status}
+                                                </span>
+                                              </div>
+                                              <p className="text-sm text-gray-600 mt-1">
+                                                Trust: <span className="font-semibold text-gray-900">
+                                                  {typeof incident.trustScore === 'object' ? incident.trustScore.totalScore : incident.trustScore || 'N/A'}/100
+                                                </span>
+                                              </p>
+                                              {incIdx === 0 && cluster.count > 1 && (
+                                                <p className="text-xs text-gray-500 mt-1">Position: Center of cluster</p>
+                                              )}
+                                            </div>
+                                            <div className="text-xs text-blue-600 font-bold">
+                                              #{incIdx + 1}
+                                            </div>
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               </div>
@@ -1237,10 +1446,10 @@ const Agency = () => {
               </div>
             </div>
           </div>
-        </div>
+        </div >
 
         {/* Footer */}
-        <footer className="flex-shrink-0 px-6 py-4 border-t border-gray-200 bg-white/80 backdrop-blur-sm">
+        < footer className="flex-shrink-0 px-6 py-4 border-t border-gray-200 bg-white/80 backdrop-blur-sm" >
           <div className="flex items-center justify-between text-sm text-gray-500">
             <div>
               Emergency Response System v2.1 • Secure Connection • Last updated:{" "}
@@ -1258,258 +1467,260 @@ const Agency = () => {
               <span>{pendingIncidents.length} active/pending incidents (all-time)</span>
             </div>
           </div>
-        </footer>
+        </footer >
 
         {/* DISPATCH MODAL */}
-        {showDispatchModal && (
-          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[9999] p-4">
-            <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl transition-all max-h-[90vh] overflow-y-auto z-[10000]">
-              <div className="sticky top-0 bg-gradient-to-r from-blue-500 to-blue-600 text-white p-6 border-b border-blue-400">
-                <h2 className="text-2xl font-bold mb-2 flex items-center gap-3">
-                  {step === 1
-                    ? "🚨 Resource Allocation"
-                    : "📡 Select Response Coordinator"}
-                </h2>
-                <p className="text-blue-100 text-sm">
-                  {step === 1
-                    ? `Deploying resources for ${selectedIncident?.type} (${selectedIncident?.severity} severity)`
-                    : `Finding available coordinators near incident location`}
-                </p>
-              </div>
+        {
+          showDispatchModal && (
+            <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[9999] p-4">
+              <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl transition-all max-h-[90vh] overflow-y-auto z-[10000]">
+                <div className="sticky top-0 bg-gradient-to-r from-blue-500 to-blue-600 text-white p-6 border-b border-blue-400">
+                  <h2 className="text-2xl font-bold mb-2 flex items-center gap-3">
+                    {step === 1
+                      ? "🚨 Resource Allocation"
+                      : "📡 Select Response Coordinator"}
+                  </h2>
+                  <p className="text-blue-100 text-sm">
+                    {step === 1
+                      ? `Deploying resources for ${selectedIncident?.type} (${selectedIncident?.severity} severity)`
+                      : `Finding available coordinators near incident location`}
+                  </p>
+                </div>
 
-              <div className="p-6">
-                {/* STEP 1: RESOURCE ALLOCATION */}
-                {step === 1 && selectedIncident && (
-                  <>
-                    {/* RECOMMENDATION SUMMARY */}
-                    <div className="mb-6 p-4 bg-gradient-to-r from-blue-50 to-cyan-50 rounded-xl border border-blue-200">
-                      <div className="flex items-start gap-3">
-                        <span className="text-2xl">{getResourceRecommendations(selectedIncident.type, selectedIncident.severity).emoji}</span>
-                        <div className="flex-1">
-                          <h3 className="font-bold text-gray-900 mb-1">
-                            {getResourceRecommendations(selectedIncident.type, selectedIncident.severity).name}
-                          </h3>
-                          <p className="text-sm text-gray-600 mb-2">
-                            Recommended resources based on incident type and severity level
-                          </p>
-                          <div className="flex flex-wrap gap-2">
-                            <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-medium">
-                              {selectedIncident.type}
-                            </span>
-                            <span className="px-3 py-1 bg-orange-100 text-orange-700 rounded-full text-xs font-medium">
-                              {selectedIncident.severity} Severity
-                            </span>
-                            <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-medium">
-                              {dispatchResources.length} Resource Types
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* RESOURCE LIST */}
-                    <div className="space-y-3 mb-6">
-                      <h3 className="font-bold text-gray-900 text-lg">Required Resources</h3>
-                      <div className="grid gap-3 max-h-96 overflow-y-auto">
-                        {dispatchResources.map((res, index) => (
-                          <div key={index} className="bg-gray-50 rounded-xl p-4 border border-gray-200 hover:border-blue-300 transition-colors">
-                            <div className="flex items-start justify-between mb-2">
-                              <div className="flex-1">
-                                <div className="flex items-center gap-2 mb-1">
-                                  <span className="font-bold text-gray-900 text-base">{res.item_name}</span>
-                                  <span className="text-xs bg-gray-200 text-gray-700 px-2 py-1 rounded-full">
-                                    {res.category}
-                                  </span>
-                                </div>
-                                <p className="text-sm text-gray-600 mb-3">{res.description}</p>
-                              </div>
-                              <button
-                                onClick={() => {
-                                  setDispatchResources(dispatchResources.filter((_, i) => i !== index));
-                                }}
-                                className="ml-2 p-2 hover:bg-red-100 text-red-600 rounded-lg transition-colors"
-                              >
-                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                </svg>
-                              </button>
-                            </div>
-
-                            <div className="flex items-center gap-3">
-                              <label className="text-sm font-medium text-gray-700 min-w-fit">Quantity:</label>
-                              <div className="flex items-center border border-gray-300 rounded-lg overflow-hidden">
-                                <button
-                                  onClick={() => {
-                                    const updated = [...dispatchResources];
-                                    if (updated[index].quantity > 1) {
-                                      updated[index].quantity -= 1;
-                                      setDispatchResources(updated);
-                                    }
-                                  }}
-                                  className="px-3 py-2 hover:bg-gray-200 text-gray-700 transition-colors"
-                                >
-                                  −
-                                </button>
-                                <input
-                                  type="number"
-                                  value={res.quantity}
-                                  onChange={(e) => {
-                                    const updated = [...dispatchResources];
-                                    const val = Math.max(1, Number(e.target.value) || 1);
-                                    updated[index].quantity = val;
-                                    setDispatchResources(updated);
-                                  }}
-                                  className="w-16 text-center border-none bg-white font-bold text-gray-900 focus:outline-none"
-                                  min="1"
-                                />
-                                <button
-                                  onClick={() => {
-                                    const updated = [...dispatchResources];
-                                    updated[index].quantity += 1;
-                                    setDispatchResources(updated);
-                                  }}
-                                  className="px-3 py-2 hover:bg-gray-200 text-gray-700 transition-colors"
-                                >
-                                  +
-                                </button>
-                              </div>
-                              <span className="text-xs text-gray-500 ml-auto">
-                                ≈ {['medical', 'rescue', 'food', 'water'].includes(res.category) ? res.quantity + ' units' : res.quantity + 'x available'}
+                <div className="p-6">
+                  {/* STEP 1: RESOURCE ALLOCATION */}
+                  {step === 1 && selectedIncident && (
+                    <>
+                      {/* RECOMMENDATION SUMMARY */}
+                      <div className="mb-6 p-4 bg-gradient-to-r from-blue-50 to-cyan-50 rounded-xl border border-blue-200">
+                        <div className="flex items-start gap-3">
+                          <span className="text-2xl">{getResourceRecommendations(selectedIncident.type, selectedIncident.severity).emoji}</span>
+                          <div className="flex-1">
+                            <h3 className="font-bold text-gray-900 mb-1">
+                              {getResourceRecommendations(selectedIncident.type, selectedIncident.severity).name}
+                            </h3>
+                            <p className="text-sm text-gray-600 mb-2">
+                              Recommended resources based on incident type and severity level
+                            </p>
+                            <div className="flex flex-wrap gap-2">
+                              <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-medium">
+                                {selectedIncident.type}
+                              </span>
+                              <span className="px-3 py-1 bg-orange-100 text-orange-700 rounded-full text-xs font-medium">
+                                {selectedIncident.severity} Severity
+                              </span>
+                              <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-medium">
+                                {dispatchResources.length} Resource Types
                               </span>
                             </div>
                           </div>
-                        ))}
+                        </div>
                       </div>
-                    </div>
 
-                    {/* SUMMARY */}
-                    <div className="bg-gray-50 rounded-xl p-4 mb-6 text-sm">
-                      <div className="font-medium text-gray-700 mb-2">Dispatch Summary</div>
-                      <ul className="space-y-1 text-gray-600">
-                        {dispatchResources.filter(r => r.quantity > 0).map((res, idx) => (
-                          <li key={idx} className="flex justify-between">
-                            <span>{res.item_name}</span>
-                            <span className="font-medium">{res.quantity} units</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-
-                    {/* ACTION BUTTONS */}
-                    <div className="flex justify-between gap-3">
-                      <button
-                        onClick={() => setShowDispatchModal(false)}
-                        className="px-4 py-3 border-2 border-gray-300 text-gray-700 hover:bg-gray-50 text-sm font-bold rounded-xl transition-all"
-                      >
-                        ✕ Cancel
-                      </button>
-                      <button
-                        onClick={fetchCoordinators}
-                        disabled={dispatchResources.filter(r => r.quantity > 0).length === 0}
-                        className={`px-6 py-3 text-white text-sm font-bold rounded-xl transition-all flex items-center gap-2 ${dispatchResources.filter(r => r.quantity > 0).length === 0
-                          ? "bg-gray-400 cursor-not-allowed"
-                          : "bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700"
-                          }`}
-                      >
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                        </svg>
-                        Find Coordinators →
-                      </button>
-                    </div>
-                  </>
-                )}
-
-                {/* STEP 2: SELECT COORDINATOR */}
-                {step === 2 && (
-                  <>
-                    {coordinators.length === 0 ? (
-                      <div className="py-12 text-center">
-                        <div className="text-5xl mb-4">🔍</div>
-                        <h3 className="text-xl font-bold text-gray-900 mb-2">No coordinators found</h3>
-                        <p className="text-gray-600 mb-6">
-                          No emergency coordinators available within the search radius.
-                        </p>
-                        <button
-                          onClick={() => setStep(1)}
-                          className="px-4 py-2 text-blue-600 hover:text-blue-700 font-medium"
-                        >
-                          ← Adjust resources and try again
-                        </button>
-                      </div>
-                    ) : (
-                      <>
-                        <p className="text-sm text-gray-600 mb-4 p-3 bg-blue-50 rounded-lg">
-                          Found <span className="font-bold text-blue-700">{coordinators.length}</span> available coordinators near the incident. Select one to dispatch resources.
-                        </p>
-
-                        <div className="space-y-3 mb-6 max-h-96 overflow-y-auto">
-                          {coordinators.map((coord) => (
-                            <div
-                              key={coord._id}
-                              onClick={() => setSelectedCoordinator(coord)}
-                              className={`p-4 border-2 rounded-xl cursor-pointer transition-all ${selectedCoordinator?._id === coord._id
-                                ? "border-blue-500 bg-blue-50 shadow-md"
-                                : "border-gray-200 hover:border-blue-300 hover:bg-gray-50"
-                                }`}
-                            >
-                              <div className="flex items-start justify-between">
+                      {/* RESOURCE LIST */}
+                      <div className="space-y-3 mb-6">
+                        <h3 className="font-bold text-gray-900 text-lg">Required Resources</h3>
+                        <div className="grid gap-3 max-h-96 overflow-y-auto">
+                          {dispatchResources.map((res, index) => (
+                            <div key={index} className="bg-gray-50 rounded-xl p-4 border border-gray-200 hover:border-blue-300 transition-colors">
+                              <div className="flex items-start justify-between mb-2">
                                 <div className="flex-1">
-                                  <div className="flex items-center gap-2 mb-2">
-                                    <span className="font-bold text-gray-900 text-lg">
-                                      {coord.name || "Coordinator"}
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <span className="font-bold text-gray-900 text-base">{res.item_name}</span>
+                                    <span className="text-xs bg-gray-200 text-gray-700 px-2 py-1 rounded-full">
+                                      {res.category}
                                     </span>
-                                    {selectedCoordinator?._id === coord._id && (
-                                      <span className="text-green-600 font-bold">✓ Selected</span>
-                                    )}
                                   </div>
-                                  <div className="grid grid-cols-2 gap-3 text-sm">
-                                    <div className="flex items-center gap-2 text-gray-600">
-                                      <span>📍</span>
-                                      <span>{coord.distanceKm ? coord.distanceKm.toFixed(1) : 'N/A'} km away</span>
-                                    </div>
-                                    <div className="flex items-center gap-2 text-gray-600">
-                                      <span>📦</span>
-                                      <span>{coord.resourceCount || 0} available assets</span>
-                                    </div>
-                                  </div>
+                                  <p className="text-sm text-gray-600 mb-3">{res.description}</p>
                                 </div>
+                                <button
+                                  onClick={() => {
+                                    setDispatchResources(dispatchResources.filter((_, i) => i !== index));
+                                  }}
+                                  className="ml-2 p-2 hover:bg-red-100 text-red-600 rounded-lg transition-colors"
+                                >
+                                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                  </svg>
+                                </button>
+                              </div>
+
+                              <div className="flex items-center gap-3">
+                                <label className="text-sm font-medium text-gray-700 min-w-fit">Quantity:</label>
+                                <div className="flex items-center border border-gray-300 rounded-lg overflow-hidden">
+                                  <button
+                                    onClick={() => {
+                                      const updated = [...dispatchResources];
+                                      if (updated[index].quantity > 1) {
+                                        updated[index].quantity -= 1;
+                                        setDispatchResources(updated);
+                                      }
+                                    }}
+                                    className="px-3 py-2 hover:bg-gray-200 text-gray-700 transition-colors"
+                                  >
+                                    −
+                                  </button>
+                                  <input
+                                    type="number"
+                                    value={res.quantity}
+                                    onChange={(e) => {
+                                      const updated = [...dispatchResources];
+                                      const val = Math.max(1, Number(e.target.value) || 1);
+                                      updated[index].quantity = val;
+                                      setDispatchResources(updated);
+                                    }}
+                                    className="w-16 text-center border-none bg-white font-bold text-gray-900 focus:outline-none"
+                                    min="1"
+                                  />
+                                  <button
+                                    onClick={() => {
+                                      const updated = [...dispatchResources];
+                                      updated[index].quantity += 1;
+                                      setDispatchResources(updated);
+                                    }}
+                                    className="px-3 py-2 hover:bg-gray-200 text-gray-700 transition-colors"
+                                  >
+                                    +
+                                  </button>
+                                </div>
+                                <span className="text-xs text-gray-500 ml-auto">
+                                  ≈ {['medical', 'rescue', 'food', 'water'].includes(res.category) ? res.quantity + ' units' : res.quantity + 'x available'}
+                                </span>
                               </div>
                             </div>
                           ))}
                         </div>
+                      </div>
 
-                        <div className="flex justify-between gap-3">
+                      {/* SUMMARY */}
+                      <div className="bg-gray-50 rounded-xl p-4 mb-6 text-sm">
+                        <div className="font-medium text-gray-700 mb-2">Dispatch Summary</div>
+                        <ul className="space-y-1 text-gray-600">
+                          {dispatchResources.filter(r => r.quantity > 0).map((res, idx) => (
+                            <li key={idx} className="flex justify-between">
+                              <span>{res.item_name}</span>
+                              <span className="font-medium">{res.quantity} units</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+
+                      {/* ACTION BUTTONS */}
+                      <div className="flex justify-between gap-3">
+                        <button
+                          onClick={() => setShowDispatchModal(false)}
+                          className="px-4 py-3 border-2 border-gray-300 text-gray-700 hover:bg-gray-50 text-sm font-bold rounded-xl transition-all"
+                        >
+                          ✕ Cancel
+                        </button>
+                        <button
+                          onClick={fetchCoordinators}
+                          disabled={dispatchResources.filter(r => r.quantity > 0).length === 0}
+                          className={`px-6 py-3 text-white text-sm font-bold rounded-xl transition-all flex items-center gap-2 ${dispatchResources.filter(r => r.quantity > 0).length === 0
+                            ? "bg-gray-400 cursor-not-allowed"
+                            : "bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700"
+                            }`}
+                        >
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                          </svg>
+                          Find Coordinators →
+                        </button>
+                      </div>
+                    </>
+                  )}
+
+                  {/* STEP 2: SELECT COORDINATOR */}
+                  {step === 2 && (
+                    <>
+                      {coordinators.length === 0 ? (
+                        <div className="py-12 text-center">
+                          <div className="text-5xl mb-4">🔍</div>
+                          <h3 className="text-xl font-bold text-gray-900 mb-2">No coordinators found</h3>
+                          <p className="text-gray-600 mb-6">
+                            No emergency coordinators available within the search radius.
+                          </p>
                           <button
                             onClick={() => setStep(1)}
-                            className="px-4 py-3 border-2 border-gray-300 text-gray-700 hover:bg-gray-50 text-sm font-bold rounded-xl transition-all flex items-center gap-2"
+                            className="px-4 py-2 text-blue-600 hover:text-blue-700 font-medium"
                           >
-                            ← Back
-                          </button>
-                          <button
-                            onClick={handleDispatch}
-                            disabled={!selectedCoordinator}
-                            className={`px-6 py-3 text-white text-sm font-bold rounded-xl transition-all flex items-center gap-2 ${!selectedCoordinator
-                              ? "bg-gray-400 cursor-not-allowed"
-                              : "bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700"
-                              }`}
-                          >
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                            </svg>
-                            Send Request
+                            ← Adjust resources and try again
                           </button>
                         </div>
-                      </>
-                    )}
-                  </>
-                )}
+                      ) : (
+                        <>
+                          <p className="text-sm text-gray-600 mb-4 p-3 bg-blue-50 rounded-lg">
+                            Found <span className="font-bold text-blue-700">{coordinators.length}</span> available coordinators near the incident. Select one to dispatch resources.
+                          </p>
+
+                          <div className="space-y-3 mb-6 max-h-96 overflow-y-auto">
+                            {coordinators.map((coord) => (
+                              <div
+                                key={coord._id}
+                                onClick={() => setSelectedCoordinator(coord)}
+                                className={`p-4 border-2 rounded-xl cursor-pointer transition-all ${selectedCoordinator?._id === coord._id
+                                  ? "border-blue-500 bg-blue-50 shadow-md"
+                                  : "border-gray-200 hover:border-blue-300 hover:bg-gray-50"
+                                  }`}
+                              >
+                                <div className="flex items-start justify-between">
+                                  <div className="flex-1">
+                                    <div className="flex items-center gap-2 mb-2">
+                                      <span className="font-bold text-gray-900 text-lg">
+                                        {coord.name || "Coordinator"}
+                                      </span>
+                                      {selectedCoordinator?._id === coord._id && (
+                                        <span className="text-green-600 font-bold">✓ Selected</span>
+                                      )}
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-3 text-sm">
+                                      <div className="flex items-center gap-2 text-gray-600">
+                                        <span>📍</span>
+                                        <span>{coord.distanceKm ? coord.distanceKm.toFixed(1) : 'N/A'} km away</span>
+                                      </div>
+                                      <div className="flex items-center gap-2 text-gray-600">
+                                        <span>📦</span>
+                                        <span>{coord.resourceCount || 0} available assets</span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+
+                          <div className="flex justify-between gap-3">
+                            <button
+                              onClick={() => setStep(1)}
+                              className="px-4 py-3 border-2 border-gray-300 text-gray-700 hover:bg-gray-50 text-sm font-bold rounded-xl transition-all flex items-center gap-2"
+                            >
+                              ← Back
+                            </button>
+                            <button
+                              onClick={handleDispatch}
+                              disabled={!selectedCoordinator}
+                              className={`px-6 py-3 text-white text-sm font-bold rounded-xl transition-all flex items-center gap-2 ${!selectedCoordinator
+                                ? "bg-gray-400 cursor-not-allowed"
+                                : "bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700"
+                                }`}
+                            >
+                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                              </svg>
+                              Send Request
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </>
+                  )}
+                </div>
               </div>
             </div>
-          </div>
-        )}
-      </div>
-    </div>
+          )
+        }
+      </div >
+    </div >
   );
 };
 

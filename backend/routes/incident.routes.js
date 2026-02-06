@@ -11,7 +11,8 @@ import {
   getIncidentStats,
   getIncidentAnalytics,
   dispatchIncident,
-  createIncidentDemo
+  createIncidentDemo,
+  groupIncidentByLocationAndType,
 } from "../controller/incident.controller.js";
 import isAuth from "../middleware/auth.middleware.js";
 
@@ -23,6 +24,7 @@ const upload = multer({ dest: "uploads/" });
 // Stats (must be before :incidentId)
 IncidentRouter.get("/stats/summary", getIncidentStats);
 IncidentRouter.get("/analytics", getIncidentAnalytics);
+IncidentRouter.get("/group", groupIncidentByLocationAndType);
 
 // Create (protected) - supports multipart image upload field name "image"
 IncidentRouter.post("/create", isAuth, upload.single("image"), createIncident);
@@ -44,7 +46,11 @@ IncidentRouter.patch("/:incidentId/status", isAuth, updateIncidentStatus);
 
 // Mark spam (protected)
 IncidentRouter.patch("/:incidentId/mark-spam", isAuth, markIncidentSpam);
-
+IncidentRouter.patch(
+  "/:incidentId/group-location-type",
+  isAuth,
+  groupIncidentByLocationAndType,
+);
 // Delete (protected)
 IncidentRouter.delete("/:incidentId", isAuth, deleteIncident);
 

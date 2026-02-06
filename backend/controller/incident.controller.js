@@ -1,3 +1,4 @@
+
 import dotenv from "dotenv";
 dotenv.config();
 
@@ -14,14 +15,17 @@ import {
   analyzeVision,
   analyzeVoice,
   analyzeSemantics,
+  processTextIntelligence,
+  detectImageFormat,
 } from "../utils/ai-analysis.js";
 import { calculateTrustScore } from "../utils/scoring.js";
 import { determinePriorityCode } from "../utils/priority-coding.js";
 import twilio from "twilio";
 
-const client = process.env.TWILIO_SID && process.env.TWILIO_AUTH_TOKEN
-  ? twilio(process.env.TWILIO_SID, process.env.TWILIO_AUTH_TOKEN)
-  : null;
+const client =
+  process.env.TWILIO_SID && process.env.TWILIO_AUTH_TOKEN
+    ? twilio(process.env.TWILIO_SID, process.env.TWILIO_AUTH_TOKEN)
+    : null;
 
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -30,21 +34,97 @@ cloudinary.config({
 });
 
 /**
+ * ==================== HELPER: DETERMINE SEVERITY FROM TRUST SCORE ====================
+ */
+const determineSeverityFromTrustScore = (trustScore, visionAnalysis, voiceAnalysis) => {
+  console.log(`\n🎯 DETERMINING SEVERITY FROM TRUST SCORE: ${trustScore.toFixed(1)}`);
+
+  // Priority 1: Check emergency objects in vision
+  const emergencyObjects = (visionAnalysis.emergency_detected || []).map(o => o.toLowerCase());
+  const keywords = (voiceAnalysis.keywords || []).map(k => k.toLowerCase());
+
+  // Check for CRITICAL indicators
+  const hasFire = emergencyObjects.some(o =>
+    ["fire", "flames", "burning", "smoke"].some(e => o.includes(e))
+  ) || keywords.some(k => ["fire", "burning", "flames"].some(e => k.includes(e)));
+
+  const hasBlood = emergencyObjects.some(o =>
+    ["blood", "injury", "trauma", "wounded"].some(e => o.includes(e))
+  ) || keywords.some(k => ["blood", "injury", "bleeding"].some(e => k.includes(e)));
+
+  const hasCollapse = emergencyObjects.some(o =>
+    ["collapse", "debris", "building", "rubble"].some(e => o.includes(e))
+  ) || keywords.some(k => ["collapse", "earthquake", "rubble"].some(e => k.includes(e)));
+
+  const hasTrapped = keywords.some(k =>
+    ["trapped", "stuck", "buried", "pinned"].some(e => k.includes(e))
+  );
+
+  const isDying = keywords.some(k =>
+    ["dying", "dead", "not breathing", "unconscious"].some(e => k.includes(e))
+  );
+
+  // CRITICAL: High trust score (75+) + critical indicators
+  if (trustScore >= 75) {
+    if (hasFire || hasCollapse || isDying || hasTrapped) {
+      console.log(`   🔴 CRITICAL: High trust (${trustScore.toFixed(1)}) + Critical indicator`);
+      return "Critical";
+    }
+    if (hasBlood) {
+      console.log(`   🔴 CRITICAL: High trust (${trustScore.toFixed(1)}) + Blood/Injury detected`);
+      return "Critical";
+    }
+    console.log(`   🔴 CRITICAL: Very high trust score (${trustScore.toFixed(1)})`);
+    return "Critical";
+  }
+
+  // HIGH: Medium-high trust (50-75) + emergency objects or urgent voice
+  if (trustScore >= 50) {
+    if (hasFire || hasBlood || hasCollapse) {
+      console.log(`   🟠 HIGH: Medium-high trust (${trustScore.toFixed(1)}) + Emergency detected`);
+      return "High";
+    }
+    if (voiceAnalysis.urgency >= 8 || voiceAnalysis.sentiment === "panic") {
+      console.log(`   🟠 HIGH: Medium-high trust (${trustScore.toFixed(1)}) + Urgent voice`);
+      return "High";
+    }
+    console.log(`   🟠 HIGH: Medium-high trust score (${trustScore.toFixed(1)})`);
+    return "High";
+  }
+
+  // MEDIUM: Moderate trust score (30-50)
+  if (trustScore >= 30) {
+    console.log(`   🟡 MEDIUM: Moderate trust score (${trustScore.toFixed(1)})`);
+    return "Medium";
+  }
+
+  // LOW: Low trust score (<30)
+  console.log(`   🟢 LOW: Low trust score (${trustScore.toFixed(1)})`);
+  return "Low";
+};
+
+/**
  * ==================== HELPER: AUTO-DETECT INCIDENT TYPE ====================
  */
-const detectIncidentType = (visionAnalysis, voiceAnalysis) => {
-  const emergencyObjects = (visionAnalysis.emergency_detected || []).map((o) =>
+const detectIncidentType = (visionAnalysis, voiceAnalysis, textIntelligence) => {
+  // Priority 1: Text Intelligence type (most reliable)
+  if (textIntelligence?.detectedType && textIntelligence.detectedType !== "Other") {
+    return textIntelligence.detectedType;
+  }
+
+  const emergencyObjects = (visionAnalysis.emergency_detected || []).map(o =>
     o.toLowerCase()
   );
-  const keywords = (voiceAnalysis.keywords || []).map((k) => k.toLowerCase());
-  const allText = [...emergencyObjects, ...keywords].join(" ");
+  const keywords = (voiceAnalysis.keywords || []).map(k => k.toLowerCase());
 
   // FIRE & BURNING
   if (
     emergencyObjects.some((o) =>
       ["fire", "flames", "burning", "smoke"].some((e) => o.includes(e))
     ) ||
-    keywords.some((k) => ["fire", "burning", "flames"].some((e) => k.includes(e)))
+    keywords.some((k) =>
+      ["fire", "burning", "flames"].some((e) => k.includes(e))
+    )
   ) {
     return "Fire";
   }
@@ -56,25 +136,11 @@ const detectIncidentType = (visionAnalysis, voiceAnalysis) => {
         o.includes(e)
       )
     ) ||
-    keywords.some((k) => ["flood", "water", "drowning"].some((e) => k.includes(e)))
-  ) {
-    return "Flood";
-  }
-
-  // EARTHQUAKE & STRUCTURAL COLLAPSE
-  if (
-    emergencyObjects.some((o) =>
-      ["collapse", "debris", "building", "rubble", "earthquake", "tremor"].some(
-        (e) => o.includes(e)
-      )
-    ) ||
     keywords.some((k) =>
-      ["collapse", "earthquake", "tremor", "quake", "rubble"].some((e) =>
-        k.includes(e)
-      )
+      ["flood", "water", "drowning"].some((e) => k.includes(e))
     )
   ) {
-    return "Earthquake";
+    return "Flood";
   }
 
   // MEDICAL EMERGENCY
@@ -85,7 +151,9 @@ const detectIncidentType = (visionAnalysis, voiceAnalysis) => {
       )
     ) ||
     keywords.some((k) =>
-      ["injury", "blood", "hurt", "medical", "hospital"].some((e) => k.includes(e))
+      ["injury", "blood", "hurt", "medical", "hospital"].some((e) =>
+        k.includes(e)
+      )
     )
   ) {
     return "Medical Emergency";
@@ -105,67 +173,22 @@ const detectIncidentType = (visionAnalysis, voiceAnalysis) => {
     return "Traffic Accident";
   }
 
-  // ARMED INCIDENT
-  if (
-    emergencyObjects.some((o) =>
-      ["weapon", "gun", "knife", "armed", "shooting"].some((e) => o.includes(e))
-    ) ||
-    keywords.some((k) =>
-      ["weapon", "gun", "shooting", "armed"].some((e) => k.includes(e))
-    )
-  ) {
-    return "Armed Incident";
-  }
-
-  // TRAPPED PERSON
-  if (
-    keywords.some((k) =>
-      ["trapped", "stuck", "buried", "pinned"].some((e) => k.includes(e))
-    )
-  ) {
-    return "Trapped Person";
-  }
-
-  // HAZMAT / CHEMICAL
-  if (
-    emergencyObjects.some((o) =>
-      ["chemical", "toxic", "gas", "hazmat", "pollution"].some((e) =>
-        o.includes(e)
-      )
-    ) ||
-    keywords.some((k) =>
-      ["chemical", "toxic", "gas", "hazmat"].some((e) => k.includes(e))
-    )
-  ) {
-    return "Hazmat Incident";
-  }
-
-  // CROWD DISTURBANCE / RIOT
-  if (
-    emergencyObjects.some((o) =>
-      ["crowd", "riot", "protest", "disturbance"].some((e) => o.includes(e))
-    ) ||
-    keywords.some((k) =>
-      ["riot", "protest", "disturbance", "crowd"].some((e) => k.includes(e))
-    )
-  ) {
-    return "Crowd Disturbance";
-  }
-
   // DEFAULT
   return "Other";
 };
 
 /**
- * ==================== MAIN HANDLER: CREATE INCIDENT ====================
+ * ==================== AUTHENTICATED ROUTE: CREATE INCIDENT ====================
  */
 export const createIncident = async (req, res) => {
   const verificationLog = [];
+  const startTime = Date.now();
 
   try {
-    console.log("\n\n" + "█".repeat(70));
-    console.log("█ 🚨 NEW INCIDENT REPORT - 5 PHASE PIPELINE");
-    console.log("█".repeat(70));
+    console.log("\n\n" + "█".repeat(80));
+    console.log("█ 🚨 NEW INCIDENT REPORT (AUTHENTICATED)");
+    console.log("█ USING OLLAMA PIPELINE");
+    console.log("█".repeat(80));
 
     const {
       mode,
@@ -179,10 +202,14 @@ export const createIncident = async (req, res) => {
       language,
     } = req.body;
 
+    console.log(`📱 Mode: ${mode}`);
+    console.log(`📍 Location: ${latitude}, ${longitude}`);
+    console.log(`👤 User ID: ${req.userId}`);
+
     // ==================== VALIDATION ====================
     if (!req.userId) {
       return res.status(401).json({
-        message: "Authentication required to report incidents"
+        message: "Authentication required to report incidents",
       });
     }
 
@@ -194,7 +221,7 @@ export const createIncident = async (req, res) => {
 
     if (typeof latitude === "undefined" || typeof longitude === "undefined") {
       return res.status(400).json({
-        message: "latitude and longitude are required"
+        message: "latitude and longitude are required",
       });
     }
 
@@ -220,26 +247,52 @@ export const createIncident = async (req, res) => {
     // ==================== PARSE IMAGE FILE ====================
     let imageBuffer = null;
     let cleanImageBase64 = null;
+    let imageFormat = null;
 
-    // From multipart upload (via multer middleware)
     if (req.file) {
       imageBuffer = await fs.promises.readFile(req.file.path);
       cleanImageBase64 = imageBuffer.toString("base64");
+      imageFormat = detectImageFormat(cleanImageBase64);
       await fs.promises.unlink(req.file.path).catch(() => { });
       console.log("📸 Image from multipart upload");
-    }
-    // From JSON base64
-    else if (imageBase64) {
+      if (imageFormat?.warning) console.log(`   ${imageFormat.warning}`);
+    } else if (imageBase64) {
       const cleaned = (imageBase64 || "").replace(/^data:.*;base64,/, "");
       imageBuffer = Buffer.from(cleaned, "base64");
       cleanImageBase64 = cleaned;
+      imageFormat = detectImageFormat(cleanImageBase64);
       console.log("📸 Image from base64 payload");
+      if (imageFormat?.warning) console.log(`   ${imageFormat.warning}`);
     }
 
-    // ==================== PHASE 1: FORENSICS ====================
-    console.log("\n" + "█".repeat(70));
-    console.log("█ PHASE 1: FORENSICS");
-    console.log("█".repeat(70));
+    // ==================== PHASE 1: TEXT INTELLIGENCE ====================
+    console.log("\n" + "=".repeat(60));
+    console.log("PHASE 1: TEXT INTELLIGENCE (OLLAMA)");
+    console.log("=".repeat(60));
+
+    const inputText = description || transcript || "";
+    let textIntelligence = {
+      translatedText: inputText,
+      detectedType: "Other",
+    };
+
+    try {
+      if (inputText.trim()) {
+        textIntelligence = await processTextIntelligence(inputText);
+        verificationLog.push({
+          phase: "text_intelligence",
+          timestamp: new Date(),
+          result: textIntelligence,
+        });
+      }
+    } catch (err) {
+      console.error("⚠️ Text Intelligence Error:", err.message);
+    }
+
+    // ==================== PHASE 2: FORENSICS ANALYSIS ====================
+    console.log("\n" + "=".repeat(60));
+    console.log("PHASE 2: FORENSICS ANALYSIS");
+    console.log("=".repeat(60));
 
     let forensics = {
       realismFactor: 1.0,
@@ -249,45 +302,48 @@ export const createIncident = async (req, res) => {
       verdict: "Analysis pending",
     };
 
-    // Only run forensics if image exists
     if (imageBuffer) {
-      forensics = await analyzeForensics(imageBuffer, mode, cleanImageBase64);
-      verificationLog.push({
-        phase: "forensics",
-        timestamp: new Date(),
-        result: forensics,
-      });
-
-      // 🚨 HARD REJECT IF DEEPFAKE
-      if (forensics.isFake) {
-        console.log("\n🚨 DEEPFAKE DETECTED - REJECTING INCIDENT");
-        return res.status(400).json({
-          message: "🚨 Image failed authenticity verification",
-          details: "This image appears to be AI-generated or manipulated",
-          verdict: forensics.verdict,
-          forensics: {
-            realismFactor: forensics.realismFactor,
-            confidenceScore: forensics.confidenceScore,
-            indicators: forensics.deepfakeIndicators,
-          },
+      try {
+        forensics = await analyzeForensics(imageBuffer, mode, cleanImageBase64);
+        verificationLog.push({
+          phase: "forensics",
+          timestamp: new Date(),
+          result: forensics,
         });
+
+        if (forensics.isFake && forensics.confidenceScore > 90) {
+          console.log("\n🚨 HIGH CONFIDENCE DEEPFAKE DETECTED");
+          return res.status(400).json({
+            message: "🚨 Image failed authenticity verification",
+            details: "This image appears to be AI-generated or manipulated",
+            verdict: forensics.verdict,
+            forensics: {
+              realismFactor: forensics.realismFactor,
+              confidenceScore: forensics.confidenceScore,
+              indicators: forensics.deepfakeIndicators,
+            },
+          });
+        }
+      } catch (err) {
+        console.error("⚠️ Forensics error:", err.message);
       }
     } else if (mode !== "VOICE") {
       console.log("⚠️ No image provided, skipping forensics");
     }
 
-    // ==================== PHASE 2-3: AI ANALYSIS ====================
-    console.log("\n" + "█".repeat(70));
-    console.log("█ PHASE 2-3: AI ANALYSIS");
-    console.log("█".repeat(70));
+    // ==================== PHASE 3: AI ANALYSIS ====================
+    console.log("\n" + "=".repeat(60));
+    console.log("PHASE 3: AI ANALYSIS");
+    console.log("=".repeat(60));
 
     let visionAnalysis = {
       detected: [],
       emergency_detected: [],
-      severity: "Unknown",
-      peopleCount: 0,
+      severity: "Medium",
+      people_count: 0,
       confidence: 0,
       isReal: true,
+      imageFormat: imageFormat || { type: "UNKNOWN", maxTrustScore: 50 },
       model: "None",
     };
 
@@ -299,21 +355,24 @@ export const createIncident = async (req, res) => {
       model: "None",
     };
 
-    let semantics = { alignmentScore: 50 };
+    let semantics = { alignmentScore: 40 };
 
     try {
       const analysisPromises = [];
 
-      // Vision: Only if image exists
       if (imageBuffer && (mode === "IMAGE_TEXT" || mode === "SHAKE_HYBRID")) {
         const base64Image = cleanImageBase64 || imageBuffer.toString("base64");
         analysisPromises.push(
           analyzeVision(base64Image)
             .then((result) => {
-              visionAnalysis = result || visionAnalysis;
-              console.log("✅ Vision analysis complete");
-              console.log(`   Emergency Objects: ${(result?.emergency_detected || []).join(", ") || "None"}`);
-              console.log(`   Severity: ${result?.severity || "Unknown"}`);
+              if (result && !result.error) {
+                visionAnalysis = { ...visionAnalysis, ...result };
+                console.log("✅ Vision analysis complete");
+                console.log(
+                  `   Emergency Objects: ${(result?.emergency_detected || []).join(", ") || "None"}`
+                );
+                console.log(`   Severity: ${result?.severity || "Medium"}`);
+              }
             })
             .catch((err) => {
               console.error("⚠️ Vision error:", err.message);
@@ -321,15 +380,21 @@ export const createIncident = async (req, res) => {
         );
       }
 
-      // Voice: Only if transcript exists
-      if (transcript && (mode === "VOICE" || mode === "IMAGE_TEXT" || mode === "SHAKE_HYBRID")) {
+      if (
+        transcript &&
+        (mode === "VOICE" || mode === "IMAGE_TEXT" || mode === "SHAKE_HYBRID")
+      ) {
         analysisPromises.push(
           analyzeVoice(transcript)
             .then((result) => {
-              voiceAnalysis = result || voiceAnalysis;
-              console.log("✅ Voice analysis complete");
-              console.log(`   Keywords: ${(result?.keywords || []).join(", ") || "None"}`);
-              console.log(`   Urgency: ${result?.urgency || 5}`);
+              if (result && !result.error) {
+                voiceAnalysis = { ...voiceAnalysis, ...result };
+                console.log("✅ Voice analysis complete");
+                console.log(
+                  `   Keywords: ${(result?.keywords || []).join(", ") || "None"}`
+                );
+                console.log(`   Urgency: ${result?.urgency || 5}`);
+              }
             })
             .catch((err) => {
               console.error("⚠️ Voice error:", err.message);
@@ -337,9 +402,8 @@ export const createIncident = async (req, res) => {
         );
       }
 
-      await Promise.all(analysisPromises);
+      await Promise.allSettled(analysisPromises);
 
-      // Semantic alignment: Only if both exist
       if (imageBuffer && transcript) {
         semantics = analyzeSemantics(visionAnalysis, voiceAnalysis);
         console.log("✅ Semantics analysis complete");
@@ -352,19 +416,20 @@ export const createIncident = async (req, res) => {
         result: { visionAnalysis, voiceAnalysis, semantics },
       });
     } catch (err) {
-      console.error("⚠️ AI analysis error:", err.message);
+      console.error("⚠️ AI analysis pipeline error:", err.message);
     }
 
-    // ==================== PHASE 4: SCORING ====================
-    console.log("\n" + "█".repeat(70));
-    console.log("█ PHASE 4: SCORING");
-    console.log("█".repeat(70));
+    // ==================== PHASE 4: TRUST SCORING ====================
+    console.log("\n" + "=".repeat(60));
+    console.log("PHASE 4: TRUST SCORING");
+    console.log("=".repeat(60));
 
     let trustScoreData = {
       totalScore: 50,
       formula: "UNKNOWN",
       breakdown: {},
       locationConsensus: { score: 0 },
+      imageFormat: imageFormat,
     };
 
     try {
@@ -377,6 +442,7 @@ export const createIncident = async (req, res) => {
         Number(latitude),
         Number(longitude)
       );
+      trustScoreData.imageFormat = imageFormat;
     } catch (err) {
       console.error("⚠️ Scoring error:", err.message);
     }
@@ -388,9 +454,9 @@ export const createIncident = async (req, res) => {
     });
 
     // ==================== PHASE 5: PRIORITY CODING ====================
-    console.log("\n" + "█".repeat(70));
-    console.log("█ PHASE 5: PRIORITY CODING");
-    console.log("█".repeat(70));
+    console.log("\n" + "=".repeat(60));
+    console.log("PHASE 5: PRIORITY CODING");
+    console.log("=".repeat(60));
 
     let priorityCode = {
       code: "ALPHA",
@@ -437,19 +503,39 @@ export const createIncident = async (req, res) => {
     }
 
     // ==================== AUTO-DETECT INCIDENT TYPE ====================
-    // ✅ If type not provided or is "Other", auto-detect from AI analysis
-    let detectedType = type || "Other";
+    let detectedType = type || textIntelligence.detectedType;
 
     if (!type || type === "Other") {
-      detectedType = detectIncidentType(visionAnalysis, voiceAnalysis);
+      detectedType = detectIncidentType(
+        visionAnalysis,
+        voiceAnalysis,
+        textIntelligence
+      );
       console.log(`\n🔍 AUTO-DETECTED TYPE: ${detectedType}`);
     }
 
-    // ==================== SAVE INCIDENT TO DATABASE ====================
+    // ==================== DETERMINE SEVERITY FROM TRUST SCORE ====================
+    console.log("\n" + "=".repeat(60));
+    console.log("DETERMINING SEVERITY FROM TRUST SCORE");
+    console.log("=".repeat(60));
+
+    const determinedSeverity = determineSeverityFromTrustScore(
+      trustScoreData.totalScore,
+      visionAnalysis,
+      voiceAnalysis
+    );
+
+    console.log(`   Final Severity: ${determinedSeverity}`);
+
+    // ==================== SAVE TO DATABASE ====================
+    console.log("\n" + "=".repeat(60));
+    console.log("PHASE 6: SAVING TO DATABASE");
+    console.log("=".repeat(60));
+
     const incidentData = {
       type: detectedType,
-      description: description || transcript || "",
-      severity: severity || "Medium",
+      description: textIntelligence.translatedText || description || transcript || "",
+      severity: determinedSeverity,
       mode,
       transcript: transcript || undefined,
       language: language || "en",
@@ -464,15 +550,16 @@ export const createIncident = async (req, res) => {
         vision: visionAnalysis,
         voice: voiceAnalysis,
         semantics,
+        textIntelligence,
       },
       trustScore: {
         totalScore: trustScoreData.totalScore,
         formula: trustScoreData.formula,
         breakdown: trustScoreData.breakdown,
         locationConsensus: trustScoreData.locationConsensus,
+        imageFormat: imageFormat,
       },
       priorityCode,
-      // ✅ ONLY mark as SPAM if deepfake OR priority code is X-RAY
       status: priorityCode.code === "X-RAY" || forensics.isFake ? "Spam" : "Pending",
       verificationLog,
     };
@@ -481,27 +568,326 @@ export const createIncident = async (req, res) => {
     await incident.save();
     await incident.populate("reportedBy", "name email phone role");
 
-    console.log("\n✅ INCIDENT CREATED SUCCESSFULLY");
-    console.log("█ Priority Code:", priorityCode.code);
-    console.log("█ Description:", priorityCode.description);
-    console.log("█ Trust Score:", trustScoreData.totalScore.toFixed(0));
-    console.log("█ Status:", incidentData.status);
-    console.log("█ Type:", incidentData.type);
-    console.log("█ Mode:", mode);
-    console.log("█".repeat(70) + "\n");
+    const processingTime = ((Date.now() - startTime) / 1000).toFixed(2);
+
+    console.log("\n✅ INCIDENT SAVED SUCCESSFULLY");
+    console.log(`📊 Processing Time: ${processingTime}s`);
+    console.log(`🆔 Incident ID: ${incident._id}`);
+    console.log(`📞 Priority: ${priorityCode.code}`);
+    console.log(`📊 Trust Score: ${trustScoreData.totalScore.toFixed(1)}`);
+    console.log(`🔴 Severity: ${determinedSeverity}`);
+    if (imageFormat?.isPNG)
+      console.log(`🔴 IMAGE: PNG (Score capped below 30)`);
+    console.log(`📋 Status: ${incidentData.status}`);
+    console.log(`🏷️ Type: ${incidentData.type}`);
+    console.log("█".repeat(80) + "\n");
 
     return res.status(201).json({
+      success: true,
       message: "✅ Incident created successfully",
       incident,
       priorityCode,
       trustScore: trustScoreData.totalScore,
+      severity: determinedSeverity,
+      textIntelligence,
+      processingTime: `${processingTime}s`,
     });
   } catch (err) {
     console.error("❌ createIncident error:", err.message);
     console.error("Stack:", err.stack);
     return res.status(500).json({
+      success: false,
       message: "Internal server error",
-      error: process.env.NODE_ENV === "development" ? err.message : "Server error",
+      error:
+        process.env.NODE_ENV === "development" ? err.message : "Server error",
+    });
+  }
+};
+
+/**
+ * ==================== DEMO/EXPO ROUTE: NO OLLAMA, TRUST SCORE < 20 ====================
+ */
+export const createIncidentDemo = async (req, res) => {
+  const startTime = Date.now();
+
+  try {
+    console.log("\n\n" + "█".repeat(80));
+    console.log("█ 🚨 DEMO INCIDENT REPORT (NO OLLAMA)");
+    console.log("█ TRUST SCORE WILL BE CAPPED BELOW 20");
+    console.log("█".repeat(80));
+
+    const demoUserEmail = req.headers["x-demo-user"] || "demo@crisis-connect.app";
+    console.log(`👤 Demo User Email: ${demoUserEmail}`);
+
+    const {
+      mode,
+      type,
+      description,
+      transcript,
+      imageBase64,
+      latitude,
+      longitude,
+      severity,
+      language,
+    } = req.body;
+
+    console.log(`📱 Mode: ${mode}`);
+    console.log(`📍 Location: ${latitude}, ${longitude}`);
+
+    // ==================== VALIDATION ====================
+    if (!mode || !["VOICE", "IMAGE_TEXT", "SHAKE_HYBRID"].includes(mode)) {
+      return res.status(400).json({
+        message: "mode must be VOICE, IMAGE_TEXT, or SHAKE_HYBRID",
+      });
+    }
+
+    if (typeof latitude === "undefined" || typeof longitude === "undefined") {
+      return res.status(400).json({
+        message: "latitude and longitude are required",
+      });
+    }
+
+    if (mode === "VOICE" && !transcript) {
+      return res.status(400).json({
+        message: "transcript is required for VOICE mode",
+      });
+    }
+
+    if (mode === "IMAGE_TEXT" && !imageBase64 && !req.file) {
+      return res.status(400).json({
+        message: "imageBase64 or image file is required for IMAGE_TEXT mode",
+      });
+    }
+
+    if (mode === "SHAKE_HYBRID" && !imageBase64 && !req.file) {
+      return res.status(400).json({
+        message: "imageBase64 or image file is required for SHAKE_HYBRID mode",
+      });
+    }
+
+    // ==================== PARSE IMAGE FILE ====================
+    let imageBuffer = null;
+    let cleanImageBase64 = null;
+    let imageFormat = null;
+
+    if (req.file) {
+      imageBuffer = await fs.promises.readFile(req.file.path);
+      cleanImageBase64 = imageBuffer.toString("base64");
+      imageFormat = detectImageFormat(cleanImageBase64);
+      await fs.promises.unlink(req.file.path).catch(() => { });
+      console.log("📸 Image from multipart upload");
+    } else if (imageBase64) {
+      const cleaned = (imageBase64 || "").replace(/^data:.*;base64,/, "");
+      imageBuffer = Buffer.from(cleaned, "base64");
+      cleanImageBase64 = cleaned;
+      imageFormat = detectImageFormat(cleanImageBase64);
+      console.log("📸 Image from base64 payload");
+    }
+
+    // ==================== DEMO: NO FORENSICS, NO AI ANALYSIS ====================
+    console.log("\n" + "=".repeat(60));
+    console.log("DEMO MODE: SKIPPING OLLAMA CALLS");
+    console.log("=".repeat(60));
+
+    // Simple demo analysis without OLLAMA
+    let visionAnalysis = {
+      detected: [],
+      emergency_detected: [],
+      severity: "Medium",
+      people_count: 0,
+      confidence: 0,
+      isReal: true,
+      imageFormat: imageFormat || { type: "UNKNOWN", maxTrustScore: 50 },
+      model: "Demo (No OLLAMA)",
+    };
+
+    let voiceAnalysis = {
+      keywords: [],
+      sentiment: "neutral",
+      urgency: 5,
+      confidence: 0,
+      model: "Demo (No OLLAMA)",
+    };
+
+    let semantics = { alignmentScore: 0 };
+    let textIntelligence = {
+      translatedText: description || transcript || "",
+      detectedType: "Other",
+    };
+
+    // Simple keyword extraction from text/transcript
+    const allText = (description || transcript || "").toLowerCase();
+    if (allText.includes("fire")) {
+      visionAnalysis.emergency_detected.push("fire");
+      voiceAnalysis.keywords.push("fire");
+      textIntelligence.detectedType = "Fire";
+    }
+    if (allText.includes("blood") || allText.includes("injury")) {
+      visionAnalysis.emergency_detected.push("injury");
+      voiceAnalysis.keywords.push("injury");
+      textIntelligence.detectedType = "Medical Emergency";
+    }
+    if (allText.includes("flood") || allText.includes("water")) {
+      visionAnalysis.emergency_detected.push("flood");
+      voiceAnalysis.keywords.push("flood");
+      textIntelligence.detectedType = "Flood";
+    }
+    if (allText.includes("accident") || allText.includes("crash")) {
+      visionAnalysis.emergency_detected.push("accident");
+      voiceAnalysis.keywords.push("accident");
+      textIntelligence.detectedType = "Traffic Accident";
+    }
+    if (allText.includes("help") || allText.includes("emergency")) {
+      voiceAnalysis.keywords.push("help");
+    }
+
+    console.log(`   Keywords extracted: ${voiceAnalysis.keywords.join(", ") || "None"}`);
+    console.log(`   Type detected: ${textIntelligence.detectedType}`);
+
+    // ==================== DEMO: TRUST SCORE CAPPED BELOW 20 ====================
+    console.log("\n" + "=".repeat(60));
+    console.log("DEMO MODE: TRUST SCORE CAPPING");
+    console.log("=".repeat(60));
+
+    // Generate random trust score between 5-20 for demo
+    const demoTrustScore = Math.floor(Math.random() * (20 - 5 + 1)) + 5;
+    console.log(`   🔴 DEMO MODE: Trust score capped to ${demoTrustScore} (max 20)`);
+
+    const trustScoreData = {
+      totalScore: demoTrustScore,
+      formula: "DEMO_STATIC",
+      breakdown: {
+        visual: 0,
+        alignment: 0,
+        consensus: 0,
+      },
+      locationConsensus: { score: 0, nearbyIncidents: 0 },
+      imageFormat: imageFormat,
+    };
+
+    // ==================== DETERMINE SEVERITY WITH LOW TRUST SCORE ====================
+    const determinedSeverity = determineSeverityFromTrustScore(
+      demoTrustScore,
+      visionAnalysis,
+      voiceAnalysis
+    );
+
+    console.log(`   Final Severity: ${determinedSeverity}`);
+
+    // ==================== SIMPLE PRIORITY CODE ====================
+    let priorityCode = {
+      code: "ALPHA",
+      description: "🟢 STANDARD: Demo report (low trust)",
+      dispatchLevel: 2,
+      autoDispatch: false,
+    };
+
+    // ==================== UPLOAD IMAGE ====================
+    let imageUrl = null;
+
+    if (imageBuffer && cleanImageBase64) {
+      try {
+        const dataUri = `data:image/jpeg;base64,${cleanImageBase64}`;
+        const upload = await cloudinary.uploader.upload(dataUri, {
+          folder: "crisis_connect/incidents/demo",
+          timeout: 60000,
+        });
+        imageUrl = upload.secure_url;
+        console.log("✅ Image uploaded to Cloudinary");
+      } catch (err) {
+        console.error("⚠️ Image upload error:", err.message);
+      }
+    }
+
+    // ==================== AUTO-DETECT TYPE ====================
+    let detectedType = type || textIntelligence.detectedType || "Other";
+
+    // ==================== FIND OR CREATE DEMO USER ====================
+    let demoUser = await User.findOne({ email: demoUserEmail });
+
+    if (!demoUser) {
+      demoUser = new User({
+        name: "Demo User",
+        email: demoUserEmail,
+        phone: "+1-DEMO-000",
+        role: "citizen",
+        isDemo: true,
+        password: "demo_no_auth_required",
+      });
+      await demoUser.save();
+      console.log(`✅ Demo user created: ${demoUserEmail}`);
+    } else {
+      console.log(`✅ Demo user found: ${demoUser.email} | Phone: ${demoUser.phone}`);
+    }
+
+    // ==================== SAVE TO DATABASE ====================
+    const incidentData = {
+      type: detectedType,
+      description: textIntelligence.translatedText,
+      severity: determinedSeverity,
+      mode,
+      transcript: transcript || undefined,
+      language: language || "en",
+      imageUrl,
+      location: {
+        type: "Point",
+        coordinates: [Number(longitude), Number(latitude)],
+      },
+      reportedBy: demoUser._id,
+      forensics: {
+        realismFactor: 1.0,
+        isFake: false,
+        confidenceScore: 0,
+        isPocket: false,
+        verdict: "Demo mode (no forensics)",
+      },
+      aiAnalysis: {
+        vision: visionAnalysis,
+        voice: voiceAnalysis,
+        semantics,
+        textIntelligence,
+      },
+      trustScore: trustScoreData,
+      priorityCode,
+      status: "Pending",
+      verificationLog: [],
+    };
+
+    const incident = new Incident(incidentData);
+    await incident.save();
+    await incident.populate("reportedBy", "name email phone role");
+
+    const processingTime = ((Date.now() - startTime) / 1000).toFixed(2);
+
+    console.log("\n✅ DEMO INCIDENT CREATED");
+    console.log(`📊 Processing Time: ${processingTime}s`);
+    console.log(`🆔 Incident ID: ${incident._id}`);
+    console.log(`📊 Trust Score: ${demoTrustScore} (CAPPED <20)`);
+    console.log(`🔴 Severity: ${determinedSeverity}`);
+    console.log(`🏷️ Type: ${detectedType}`);
+    console.log("█".repeat(80) + "\n");
+
+    return res.status(201).json({
+      success: true,
+      message: "✅ Demo incident created successfully",
+      incident,
+      priorityCode,
+      trustScore: demoTrustScore,
+      severity: determinedSeverity,
+      demoUser: {
+        id: demoUser._id,
+        email: demoUser.email,
+        name: demoUser.name,
+      },
+      processingTime: `${processingTime}s`,
+    });
+  } catch (err) {
+    console.error("❌ createIncidentDemo error:", err.message);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error:
+        process.env.NODE_ENV === "development" ? err.message : "Server error",
     });
   }
 };
@@ -550,26 +936,27 @@ export const updateIncidentStatus = async (req, res) => {
     const { incidentId } = req.params;
     const { status, respondedBy, dispatchedResources } = req.body;
 
-    // Find and Update
     const incident = await Incident.findByIdAndUpdate(
       incidentId,
       {
         ...(status && { status }),
         ...(respondedBy && { respondedBy }),
-        ...(dispatchedResources && { dispatchedResources })
+        ...(dispatchedResources && { dispatchedResources }),
       },
       { new: true }
     ).populate("reportedBy");
 
-    if (!incident) return res.status(404).json({ message: "Incident not found" });
+    if (!incident)
+      return res.status(404).json({ message: "Incident not found" });
 
-    // 🔔 NOTIFICATION LOGIC: If Resolved
     if (status === "Resolved" && client && incident.reportedBy?.phone) {
       try {
         await client.messages.create({
-          body: `✅ INCIDENT RESOLVED: The emergency report #${incident._id.toString().slice(-4)} has been closed. All units are returning to base. Stay safe!`,
+          body: `✅ INCIDENT RESOLVED: The emergency report #${incident._id
+            .toString()
+            .slice(-4)} has been closed. All units are returning to base. Stay safe!`,
           from: process.env.TWILIO_PHONE_NUMBER,
-          to: incident.reportedBy.phone
+          to: incident.reportedBy.phone,
         });
         console.log(`Resolution SMS sent to ${incident.reportedBy.phone}`);
       } catch (e) {
@@ -661,7 +1048,6 @@ export const getIncidentStats = async (req, res) => {
     return res.status(500).json({ message: "Internal server error" });
   }
 };
-
 export const getIncidentAnalytics = async (req, res) => {
   try {
     const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 365);
@@ -1046,390 +1432,527 @@ export const dispatchIncident = async (req, res) => {
   }
 };
 
-/**
- * ==================== DEMO/EXPO HANDLER: CREATE INCIDENT ====================
- * No authentication required - uses x-demo-user header
- */
-/**
- * ==================== DEMO/EXPO HANDLER: CREATE INCIDENT ====================
- * No authentication required - uses x-demo-user header
- * Extracts phone from User DB if email exists
- */
-export const createIncidentDemo = async (req, res) => {
-  const verificationLog = [];
 
+
+// ...existing code...
+
+/**
+ * ==================== GROUP & CLUSTER INCIDENTS BY LOCATION ====================
+ * Groups incidents by TYPE and CLUSTERS similar incidents by proximity
+ * Supports dynamic radius: 10m, 20m, 50m, 100m, 500m, 1000m
+ * Shows which incidents are DUPLICATES (same incident, multiple reports)
+ */
+export const groupIncidentByLocationAndType = async (req, res) => {
   try {
-    console.log("\n\n" + "█".repeat(70));
-    console.log("█ 🚨 EXPO DEMO INCIDENT REPORT - 5 PHASE PIPELINE");
-    console.log("█".repeat(70));
+    console.log("\n" + "=".repeat(80));
+    console.log("📍 GROUP INCIDENTS BY LOCATION AND TYPE WITH CLUSTERING");
+    console.log("=".repeat(80));
 
-    // Get demo user email from header
-    const demoUserEmail = req.headers['x-demo-user'] || 'demo@crisis-connect.app';
-    console.log(`👤 Demo User Email: ${demoUserEmail}`);
-
-    const {
-      mode,
-      type,
-      description,
-      transcript,
-      imageBase64,
-      latitude,
-      longitude,
-      severity,
-      language,
-    } = req.body;
+    const { latitude, longitude, radius = 100, clusterRadius = 50 } = req.query;
 
     // ==================== VALIDATION ====================
-    if (!mode || !["VOICE", "IMAGE_TEXT", "SHAKE_HYBRID"].includes(mode)) {
+    if (!latitude || !longitude) {
       return res.status(400).json({
-        message: "mode must be VOICE, IMAGE_TEXT, or SHAKE_HYBRID",
+        success: false,
+        message: "latitude and longitude are required query parameters",
+        code: "MISSING_COORDINATES",
       });
     }
 
-    if (typeof latitude === "undefined" || typeof longitude === "undefined") {
+    const lat = parseFloat(latitude);
+    const lon = parseFloat(longitude);
+
+    if (isNaN(lat) || isNaN(lon)) {
       return res.status(400).json({
-        message: "latitude and longitude are required"
+        success: false,
+        message: "latitude and longitude must be valid numbers",
+        code: "INVALID_COORDINATES",
       });
     }
 
-    // Mode-specific validation
-    if (mode === "VOICE" && !transcript) {
+    if (lat < -90 || lat > 90) {
       return res.status(400).json({
-        message: "transcript is required for VOICE mode",
+        success: false,
+        message: "latitude must be between -90 and 90",
+        code: "INVALID_LATITUDE",
       });
     }
 
-    if (mode === "IMAGE_TEXT" && !imageBase64 && !req.file) {
+    if (lon < -180 || lon > 180) {
       return res.status(400).json({
-        message: "imageBase64 or image file is required for IMAGE_TEXT mode",
+        success: false,
+        message: "longitude must be between -180 and 180",
+        code: "INVALID_LONGITUDE",
       });
     }
 
-    if (mode === "SHAKE_HYBRID" && !imageBase64 && !req.file) {
+    // Validate search radius
+    const validRadii = [10, 20, 50, 100, 500, 1000];
+    const searchRadiusMeters = Number(radius);
+
+    if (!validRadii.includes(searchRadiusMeters)) {
       return res.status(400).json({
-        message: "imageBase64 or image file is required for SHAKE_HYBRID mode",
+        success: false,
+        message: `radius must be one of: ${validRadii.join(", ")} meters`,
+        code: "INVALID_RADIUS",
+        validRadii,
       });
     }
 
-    // ==================== PARSE IMAGE FILE ====================
-    let imageBuffer = null;
-    let cleanImageBase64 = null;
-
-    // From multipart upload (via multer middleware)
-    if (req.file) {
-      imageBuffer = await fs.promises.readFile(req.file.path);
-      cleanImageBase64 = imageBuffer.toString("base64");
-      await fs.promises.unlink(req.file.path).catch(() => { });
-      console.log("📸 Image from multipart upload");
-    }
-    // From JSON base64
-    else if (imageBase64) {
-      const cleaned = (imageBase64 || "").replace(/^data:.*;base64,/, "");
-      imageBuffer = Buffer.from(cleaned, "base64");
-      cleanImageBase64 = cleaned;
-      console.log("📸 Image from base64 payload");
+    // Cluster radius should be <= search radius
+    let clusterRadiusMeters = Number(clusterRadius) || Math.min(50, searchRadiusMeters);
+    if (clusterRadiusMeters < 5 || clusterRadiusMeters > searchRadiusMeters) {
+      clusterRadiusMeters = Math.min(50, searchRadiusMeters);
     }
 
-    // ==================== PHASE 1: FORENSICS ====================
-    console.log("\n" + "█".repeat(70));
-    console.log("█ PHASE 1: FORENSICS");
-    console.log("█".repeat(70));
+    console.log(`   📍 Location: (${lat.toFixed(4)}, ${lon.toFixed(4)})`);
+    console.log(`   📏 Search Radius: ${searchRadiusMeters}m`);
+    console.log(`   🔗 Cluster Radius (within same incident): ${clusterRadiusMeters}m`);
 
-    let forensics = {
-      realismFactor: 1.0,
-      isFake: false,
-      confidenceScore: 0,
-      isPocket: false,
-      verdict: "Analysis pending",
-    };
+    // ==================== DEBUG: Check all incidents in DB ====================
+    const allIncidents = await Incident.countDocuments();
+    const allLocationIncidents = await Incident.countDocuments({ location: { $exists: true } });
+    const spamIncidents = await Incident.countDocuments({ status: "Spam" });
+    const nonSpamIncidents = await Incident.countDocuments({ status: { $ne: "Spam" } });
 
-    // Only run forensics if image exists
-    if (imageBuffer) {
-      forensics = await analyzeForensics(imageBuffer, mode, cleanImageBase64);
-      verificationLog.push({
-        phase: "forensics",
-        timestamp: new Date(),
-        result: forensics,
-      });
+    console.log(`\n📊 DATABASE STATS:`);
+    console.log(`   Total incidents in DB: ${allIncidents}`);
+    console.log(`   Incidents with location field: ${allLocationIncidents}`);
+    console.log(`   Spam incidents: ${spamIncidents}`);
+    console.log(`   Non-spam incidents: ${nonSpamIncidents}`);
 
-      // 🚨 HARD REJECT IF DEEPFAKE
-      if (forensics.isFake) {
-        console.log("\n🚨 DEEPFAKE DETECTED - REJECTING INCIDENT");
-        return res.status(400).json({
-          message: "🚨 Image failed authenticity verification",
-          details: "This image appears to be AI-generated or manipulated",
-          verdict: forensics.verdict,
-          forensics: {
-            realismFactor: forensics.realismFactor,
-            confidenceScore: forensics.confidenceScore,
-            indicators: forensics.deepfakeIndicators,
-          },
-        });
-      }
-    } else if (mode !== "VOICE") {
-      console.log("⚠️ No image provided, skipping forensics");
-    }
+    // ==================== GEOSPATIAL QUERY ====================
+    const earthRadiusMeters = 6378137;
+    const searchRadiusInRadians = searchRadiusMeters / earthRadiusMeters;
 
-    // ==================== PHASE 2-3: AI ANALYSIS ====================
-    console.log("\n" + "█".repeat(70));
-    console.log("█ PHASE 2-3: AI ANALYSIS");
-    console.log("█".repeat(70));
-
-    let visionAnalysis = {
-      detected: [],
-      emergency_detected: [],
-      severity: "Unknown",
-      peopleCount: 0,
-      confidence: 0,
-      isReal: true,
-      model: "None",
-    };
-
-    let voiceAnalysis = {
-      keywords: [],
-      sentiment: "neutral",
-      urgency: 5,
-      confidence: 0,
-      model: "None",
-    };
-
-    let semantics = { alignmentScore: 50 };
-
-    try {
-      const analysisPromises = [];
-
-      // Vision: Only if image exists
-      if (imageBuffer && (mode === "IMAGE_TEXT" || mode === "SHAKE_HYBRID")) {
-        const base64Image = cleanImageBase64 || imageBuffer.toString("base64");
-        analysisPromises.push(
-          analyzeVision(base64Image)
-            .then((result) => {
-              visionAnalysis = result || visionAnalysis;
-              console.log("✅ Vision analysis complete");
-              console.log(`   Emergency Objects: ${(result?.emergency_detected || []).join(", ") || "None"}`);
-              console.log(`   Severity: ${result?.severity || "Unknown"}`);
-            })
-            .catch((err) => {
-              console.error("⚠️ Vision error:", err.message);
-            })
-        );
-      }
-
-      // Voice: Only if transcript exists
-      if (transcript && (mode === "VOICE" || mode === "IMAGE_TEXT" || mode === "SHAKE_HYBRID")) {
-        analysisPromises.push(
-          analyzeVoice(transcript)
-            .then((result) => {
-              voiceAnalysis = result || voiceAnalysis;
-              console.log("✅ Voice analysis complete");
-              console.log(`   Keywords: ${(result?.keywords || []).join(", ") || "None"}`);
-              console.log(`   Urgency: ${result?.urgency || 5}`);
-            })
-            .catch((err) => {
-              console.error("⚠️ Voice error:", err.message);
-            })
-        );
-      }
-
-      await Promise.all(analysisPromises);
-
-      // Semantic alignment: Only if both exist
-      if (imageBuffer && transcript) {
-        semantics = analyzeSemantics(visionAnalysis, voiceAnalysis);
-        console.log("✅ Semantics analysis complete");
-        console.log(`   Alignment Score: ${semantics.alignmentScore}`);
-      }
-
-      verificationLog.push({
-        phase: "ai_analysis",
-        timestamp: new Date(),
-        result: { visionAnalysis, voiceAnalysis, semantics },
-      });
-    } catch (err) {
-      console.error("⚠️ AI analysis error:", err.message);
-    }
-
-    // ==================== PHASE 4: SCORING ====================
-    console.log("\n" + "█".repeat(70));
-    console.log("█ PHASE 4: SCORING");
-    console.log("█".repeat(70));
-
-    let trustScoreData = {
-      totalScore: 50,
-      formula: "UNKNOWN",
-      breakdown: {},
-      locationConsensus: { score: 0 },
-    };
-
-    try {
-      trustScoreData = await calculateTrustScore(
-        mode,
-        forensics,
-        visionAnalysis,
-        voiceAnalysis,
-        semantics,
-        Number(latitude),
-        Number(longitude)
-      );
-    } catch (err) {
-      console.error("⚠️ Scoring error:", err.message);
-    }
-
-    verificationLog.push({
-      phase: "scoring",
-      timestamp: new Date(),
-      result: trustScoreData,
-    });
-
-    // ==================== PHASE 5: PRIORITY CODING ====================
-    console.log("\n" + "█".repeat(70));
-    console.log("█ PHASE 5: PRIORITY CODING");
-    console.log("█".repeat(70));
-
-    let priorityCode = {
-      code: "ALPHA",
-      description: "Standard incident",
-      dispatchLevel: 2,
-      autoDispatch: false,
-    };
-
-    try {
-      priorityCode = await determinePriorityCode(
-        trustScoreData,
-        forensics,
-        voiceAnalysis,
-        visionAnalysis,
-        trustScoreData.locationConsensus,
-        Number(latitude),
-        Number(longitude)
-      );
-    } catch (err) {
-      console.error("⚠️ Priority coding error:", err.message);
-    }
-
-    verificationLog.push({
-      phase: "priority_coding",
-      timestamp: new Date(),
-      result: priorityCode,
-    });
-
-    // ==================== UPLOAD IMAGE TO CLOUDINARY ====================
-    let imageUrl = null;
-
-    if (imageBuffer && cleanImageBase64) {
-      try {
-        const dataUri = `data:image/jpeg;base64,${cleanImageBase64}`;
-        const upload = await cloudinary.uploader.upload(dataUri, {
-          folder: "crisis_connect/incidents/demo",
-          timeout: 60000,
-        });
-        imageUrl = upload.secure_url;
-        console.log("✅ Image uploaded to Cloudinary");
-      } catch (err) {
-        console.error("⚠️ Image upload error:", err.message);
-      }
-    }
-
-    // ==================== AUTO-DETECT INCIDENT TYPE ====================
-    let detectedType = type || "Other";
-
-    if (!type || type === "Other") {
-      detectedType = detectIncidentType(visionAnalysis, voiceAnalysis);
-      console.log(`\n🔍 AUTO-DETECTED TYPE: ${detectedType}`);
-    }
-
-    // ==================== FIND EXISTING USER BY EMAIL ====================
-    // ✅ FIX: Look for user with matching email - if found, use their phone
-    let demoUser = await User.findOne({ email: demoUserEmail });
-    
-    if (!demoUser) {
-      // User doesn't exist - create temporary demo user
-      demoUser = new User({
-        name: "Expo Demo User",
-        email: demoUserEmail,
-        phone: "+1-DEMO-000", // Placeholder phone
-        role: "citizen",
-        isDemo: true,
-        password: "demo_no_auth",
-      });
-      await demoUser.save();
-      console.log(`✅ Demo user created: ${demoUserEmail}`);
-    } else {
-      // User exists - use their phone from DB
-      console.log(`✅ User found: ${demoUser.email} | Phone: ${demoUser.phone}`);
-    }
-
-    // ==================== SAVE INCIDENT TO DATABASE ====================
-    const incidentData = {
-      type: detectedType,
-      description: description || transcript || "",
-      severity: severity || "Medium",
-      mode,
-      transcript: transcript || undefined,
-      language: language || "en",
-      imageUrl,
+    const query = {
       location: {
-        type: "Point",
-        coordinates: [Number(longitude), Number(latitude)],
+        $geoWithin: {
+          $centerSphere: [[lon, lat], searchRadiusInRadians],
+        },
       },
-      reportedBy: demoUser._id,
-      forensics,
-      aiAnalysis: {
-        vision: visionAnalysis,
-        voice: voiceAnalysis,
-        semantics,
-      },
-      trustScore: {
-        totalScore: trustScoreData.totalScore,
-        formula: trustScoreData.formula,
-        breakdown: trustScoreData.breakdown,
-        locationConsensus: trustScoreData.locationConsensus,
-      },
-      priorityCode,
-      status: priorityCode.code === "X-RAY" || forensics.isFake ? "Spam" : "Pending",
-      verificationLog,
+      status: { $ne: "Spam" },
     };
 
-    const incident = new Incident(incidentData);
-    await incident.save();
-    await incident.populate("reportedBy", "name email phone role");
+    const startTime = Date.now();
 
-    console.log("\n✅ DEMO INCIDENT CREATED SUCCESSFULLY");
-    console.log("█ ID:", incident._id);
-    console.log("█ Priority Code:", priorityCode.code);
-    console.log("█ Trust Score:", trustScoreData.totalScore.toFixed(0));
-    console.log("█ Status:", incidentData.status);
-    console.log("█ Type:", incidentData.type);
-    console.log("█ Mode:", mode);
-    console.log("█ Reporter Email:", demoUserEmail);
-    console.log("█ Reporter Phone:", demoUser.phone);
-    console.log("█".repeat(70) + "\n");
+    const incidents = await Incident.find(query)
+      .sort({ createdAt: -1 })
+      .populate("reportedBy", "name email phone role")
+      .populate("respondedBy", "name email phone role")
+      .populate("dispatchedResources", "name type status")
+      .select(
+        "_id type severity status description location trustScore priorityCode reportedBy respondedBy dispatchedResources createdAt mode"
+      )
+      .lean();
 
-    return res.status(201).json({
-      message: "✅ Demo incident created successfully",
-      incident,
-      priorityCode,
-      trustScore: trustScoreData.totalScore,
-      demoUser: {
-        id: demoUser._id,
-        email: demoUser.email,
-        name: demoUser.name,
-        phone: demoUser.phone, // ✅ Include phone in response
+    const queryTime = Date.now() - startTime;
+
+    console.log(`\n✅ GEOSPATIAL QUERY RESULTS:`);
+    console.log(`   Query time: ${queryTime}ms`);
+    console.log(`   📊 Incidents within radius: ${incidents.length}`);
+
+    // Log first incident for debugging
+    if (incidents.length > 0) {
+      console.log(`   📍 First incident location:`, incidents[0].location);
+      console.log(`   📍 Query center: [${lon}, ${lat}]`);
+    } else {
+      console.log(`   ⚠️ NO INCIDENTS FOUND - checking search area...`);
+      // Check if there are ANY non-spam incidents with location
+      const anyNonSpam = await Incident.findOne({ status: { $ne: "Spam" }, location: { $exists: true } });
+      if (anyNonSpam) {
+        console.log(`   📍 Sample non-spam incident location:`, anyNonSpam.location);
+        console.log(`   💡 The issue might be that incidents are NOT in the search radius from (${lat.toFixed(4)}, ${lon.toFixed(4)})`);
+      } else {
+        console.log(`   💡 No non-spam incidents with location found in database`);
+      }
+    }
+
+    // ==================== HELPER: CALCULATE DISTANCE BETWEEN TWO INCIDENTS ====================
+    const calculateDistanceBetweenIncidents = (incident1, incident2) => {
+      const R = 6371; // km
+      const lat1 = incident1.location.coordinates[1];
+      const lon1 = incident1.location.coordinates[0];
+      const lat2 = incident2.location.coordinates[1];
+      const lon2 = incident2.location.coordinates[0];
+
+      const dLat = ((lat2 - lat1) * Math.PI) / 180;
+      const dLon = ((lon2 - lon1) * Math.PI) / 180;
+      const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos((lat1 * Math.PI) / 180) *
+        Math.cos((lat2 * Math.PI) / 180) *
+        Math.sin(dLon / 2) *
+        Math.sin(dLon / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return Math.round(R * c * 1000); // meters
+    };
+
+    // ==================== CALCULATE DISTANCES FROM QUERY LOCATION ====================
+    const incidentsWithDistance = incidents.map((incident) => {
+      const incidentLon = incident.location.coordinates[0];
+      const incidentLat = incident.location.coordinates[1];
+
+      const R = 6371;
+      const dLat = ((incidentLat - lat) * Math.PI) / 180;
+      const dLon = ((incidentLon - lon) * Math.PI) / 180;
+      const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos((lat * Math.PI) / 180) *
+        Math.cos((incidentLat * Math.PI) / 180) *
+        Math.sin(dLon / 2) *
+        Math.sin(dLon / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      const distanceKm = R * c;
+      const distanceMeters = Math.round(distanceKm * 1000);
+
+      return {
+        _id: incident._id,
+        type: incident.type,
+        severity: incident.severity,
+        status: incident.status,
+        mode: incident.mode,
+        description: incident.description,
+        trustScore: incident.trustScore?.totalScore || 0,
+        priorityCode: incident.priorityCode?.code || "ALPHA",
+        dispatchLevel: incident.priorityCode?.dispatchLevel || 1,
+        reportedBy: incident.reportedBy,
+        respondedBy: incident.respondedBy,
+        dispatchedResources: incident.dispatchedResources,
+        location: {
+          latitude: incidentLat,
+          longitude: incidentLon,
+        },
+        distance: {
+          meters: distanceMeters,
+          kilometers: parseFloat(distanceKm.toFixed(3)),
+        },
+        createdAt: incident.createdAt,
+      };
+    });
+
+    // ==================== GROUP BY TYPE ====================
+    const groupedByType = {};
+
+    incidentsWithDistance.forEach((incident) => {
+      const type = incident.type || "Unknown";
+
+      if (!groupedByType[type]) {
+        groupedByType[type] = {
+          type,
+          totalCount: 0,
+          clusters: [],
+          rawIncidents: [],
+        };
+      }
+
+      groupedByType[type].totalCount += 1;
+      groupedByType[type].rawIncidents.push(incident);
+    });
+
+    // ==================== CLUSTER WITHIN EACH TYPE ====================
+    const groupedResults = Object.values(groupedByType).map((group) => {
+      const incidents = group.rawIncidents;
+      const clusters = [];
+      const assignedIncidents = new Set();
+
+      // DBSCAN-like clustering algorithm
+      incidents.forEach((incident, idx) => {
+        if (assignedIncidents.has(incident._id.toString())) {
+          return; // Already in a cluster
+        }
+
+        // Create new cluster
+        const cluster = {
+          clusterId: `${group.type}_cluster_${clusters.length + 1}`,
+          centerLocation: {
+            latitude: incident.location.latitude,
+            longitude: incident.location.longitude,
+          },
+          incidents: [incident],
+          count: 1,
+          isSingleReport: true,
+          isDuplicate: false,
+          statistics: {
+            bySeverity: {},
+            byStatus: {},
+            byMode: {},
+            trustScores: { min: 100, max: 0, average: 0 },
+            distanceMetrics: { min: 0, max: 0, average: 0 },
+          },
+        };
+
+        assignedIncidents.add(incident._id.toString());
+
+        // Find nearby incidents (within clusterRadius)
+        incidents.forEach((otherIncident, otherIdx) => {
+          if (
+            assignedIncidents.has(otherIncident._id.toString()) ||
+            idx === otherIdx
+          ) {
+            return;
+          }
+
+          const distMeters = calculateDistanceBetweenIncidents(
+            incident,
+            otherIncident
+          );
+
+          if (distMeters <= clusterRadiusMeters) {
+            cluster.incidents.push(otherIncident);
+            cluster.count += 1;
+            assignedIncidents.add(otherIncident._id.toString());
+          }
+        });
+
+        // Mark if duplicate reports
+        if (cluster.count > 1) {
+          cluster.isSingleReport = false;
+          cluster.isDuplicate = true;
+        }
+
+        // Calculate cluster statistics
+        let totalTrustScore = 0;
+        let totalDistance = 0;
+
+        cluster.incidents.forEach((inc, incIdx) => {
+          // Severity
+          cluster.statistics.bySeverity[inc.severity] =
+            (cluster.statistics.bySeverity[inc.severity] || 0) + 1;
+
+          // Status
+          cluster.statistics.byStatus[inc.status] =
+            (cluster.statistics.byStatus[inc.status] || 0) + 1;
+
+          // Mode
+          cluster.statistics.byMode[inc.mode] =
+            (cluster.statistics.byMode[inc.mode] || 0) + 1;
+
+          // Trust score
+          totalTrustScore += inc.trustScore;
+          cluster.statistics.trustScores.min = Math.min(
+            cluster.statistics.trustScores.min,
+            inc.trustScore
+          );
+          cluster.statistics.trustScores.max = Math.max(
+            cluster.statistics.trustScores.max,
+            inc.trustScore
+          );
+
+          // Distance from first incident in cluster
+          const distFromFirst = calculateDistanceBetweenIncidents(
+            cluster.incidents[0],
+            inc
+          );
+          if (incIdx === 0) {
+            cluster.statistics.distanceMetrics.min = 0;
+          } else {
+            cluster.statistics.distanceMetrics.min = Math.min(
+              cluster.statistics.distanceMetrics.min || Infinity,
+              distFromFirst
+            );
+          }
+          cluster.statistics.distanceMetrics.max = Math.max(
+            cluster.statistics.distanceMetrics.max,
+            distFromFirst
+          );
+          totalDistance += distFromFirst;
+        });
+
+        if (cluster.count > 0) {
+          cluster.statistics.trustScores.average = parseFloat(
+            (totalTrustScore / cluster.count).toFixed(2)
+          );
+          cluster.statistics.distanceMetrics.average = Math.round(
+            totalDistance / cluster.count
+          );
+        }
+
+        // Sort incidents within cluster by time (newest first)
+        cluster.incidents.sort(
+          (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
+        );
+
+        clusters.push(cluster);
+      });
+
+      // Sort clusters by: duplicates first, then by count
+      clusters.sort((a, b) => {
+        if (a.isDuplicate !== b.isDuplicate) {
+          return a.isDuplicate ? -1 : 1; // Duplicates first
+        }
+        return b.count - a.count; // Then by count
+      });
+
+      // ==================== GROUP STATISTICS ====================
+      const statistics = {
+        totalIncidents: incidents.length,
+        clusterCount: clusters.length,
+        duplicateClusters: clusters.filter((c) => c.isDuplicate).length,
+        singleReportClusters: clusters.filter((c) => c.isSingleReport).length,
+        bySeverity: { Critical: 0, High: 0, Medium: 0, Low: 0 },
+        byStatus: { Pending: 0, Active: 0, Resolved: 0 },
+        byMode: {},
+        trustScores: { min: 100, max: 0, average: 0 },
+        distanceMetrics: {
+          closest: Infinity,
+          farthest: 0,
+          average: 0,
+        },
+      };
+
+      let totalTrustScore = 0;
+      let totalDistance = 0;
+
+      incidents.forEach((incident) => {
+        statistics.bySeverity[incident.severity] =
+          (statistics.bySeverity[incident.severity] || 0) + 1;
+        statistics.byStatus[incident.status] =
+          (statistics.byStatus[incident.status] || 0) + 1;
+        statistics.byMode[incident.mode] =
+          (statistics.byMode[incident.mode] || 0) + 1;
+
+        totalTrustScore += incident.trustScore;
+        statistics.trustScores.min = Math.min(
+          statistics.trustScores.min,
+          incident.trustScore
+        );
+        statistics.trustScores.max = Math.max(
+          statistics.trustScores.max,
+          incident.trustScore
+        );
+
+        statistics.distanceMetrics.closest = Math.min(
+          statistics.distanceMetrics.closest,
+          incident.distance.meters
+        );
+        statistics.distanceMetrics.farthest = Math.max(
+          statistics.distanceMetrics.farthest,
+          incident.distance.meters
+        );
+        totalDistance += incident.distance.meters;
+      });
+
+      if (incidents.length > 0) {
+        statistics.trustScores.average = parseFloat(
+          (totalTrustScore / incidents.length).toFixed(2)
+        );
+        statistics.distanceMetrics.average = Math.round(
+          totalDistance / incidents.length
+        );
+      }
+
+      return {
+        type: group.type,
+        totalCount: group.totalCount,
+        clusters,
+        statistics,
+      };
+    });
+
+    // Sort groups by incident count
+    groupedResults.sort((a, b) => b.totalCount - a.totalCount);
+
+    // ==================== OVERALL STATISTICS ====================
+    const overallStatistics = {
+      searchRadius: searchRadiusMeters,
+      clusterRadius: clusterRadiusMeters,
+      totalIncidents: incidentsWithDistance.length,
+      totalTypeGroups: groupedResults.length,
+      totalClusters: groupedResults.reduce(
+        (sum, g) => sum + g.clusters.length,
+        0
+      ),
+      totalDuplicateClusters: groupedResults.reduce(
+        (sum, g) => sum + g.statistics.duplicateClusters,
+        0
+      ),
+      bySeverity: { Critical: 0, High: 0, Medium: 0, Low: 0 },
+      byStatus: { Pending: 0, Active: 0, Resolved: 0 },
+      byMode: {},
+      trustScores: { min: 100, max: 0, average: 0 },
+    };
+
+    let totalTrustScore = 0;
+
+    incidentsWithDistance.forEach((incident) => {
+      overallStatistics.bySeverity[incident.severity] =
+        (overallStatistics.bySeverity[incident.severity] || 0) + 1;
+      overallStatistics.byStatus[incident.status] =
+        (overallStatistics.byStatus[incident.status] || 0) + 1;
+      overallStatistics.byMode[incident.mode] =
+        (overallStatistics.byMode[incident.mode] || 0) + 1;
+
+      totalTrustScore += incident.trustScore;
+      overallStatistics.trustScores.min = Math.min(
+        overallStatistics.trustScores.min,
+        incident.trustScore
+      );
+      overallStatistics.trustScores.max = Math.max(
+        overallStatistics.trustScores.max,
+        incident.trustScore
+      );
+    });
+
+    if (incidentsWithDistance.length > 0) {
+      overallStatistics.trustScores.average = parseFloat(
+        (totalTrustScore / incidentsWithDistance.length).toFixed(2)
+      );
+    }
+
+    console.log(`\n📊 CLUSTERING RESULTS:`);
+    console.log(`   Total Type Groups: ${groupedResults.length}`);
+    console.log(
+      `   Total Clusters: ${overallStatistics.totalClusters} (${overallStatistics.totalDuplicateClusters} are duplicates)`
+    );
+    groupedResults.forEach((group) => {
+      console.log(
+        `   📍 ${group.type}: ${group.totalCount} incidents in ${group.clusters.length} clusters`
+      );
+      group.clusters.forEach((cluster) => {
+        const marker = cluster.isDuplicate ? "🔴 DUPLICATE" : "✅ UNIQUE";
+        console.log(
+          `      ${marker} Cluster ${cluster.clusterId}: ${cluster.count} reports within ${clusterRadiusMeters}m`
+        );
+      });
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        queryLocation: {
+          latitude: lat,
+          longitude: lon,
+          searchRadiusMeters,
+          clusterRadiusMeters,
+        },
+        groupedIncidents: groupedResults,
+        overallStatistics,
+        metadata: {
+          queryTime: `${queryTime}ms`,
+          timestamp: new Date().toISOString(),
+          note: "Incidents grouped by type, then clustered by proximity. Red clusters = duplicate reports of same incident. Green clusters = unique incidents.",
+        },
       },
     });
   } catch (err) {
-    console.error("❌ createIncidentDemo error:", err.message);
-    console.error("Stack:", err.stack);
+    console.error("❌ groupIncidentByLocationAndType error:", err.message);
+    console.error(err.stack);
+
     return res.status(500).json({
+      success: false,
       message: "Internal server error",
-      error: process.env.NODE_ENV === "development" ? err.message : "Server error",
+      error:
+        process.env.NODE_ENV === "development" ? err.message : "Server error",
+      code: "INTERNAL_SERVER_ERROR",
     });
   }
 };
 
 // ...existing code...
 
-// ...existing code...
+
+
 
 export default {
   createIncident,
@@ -1443,4 +1966,5 @@ export default {
   getIncidentAnalytics,
   dispatchIncident,
   createIncidentDemo,
+  groupIncidentByLocationAndType
 };
