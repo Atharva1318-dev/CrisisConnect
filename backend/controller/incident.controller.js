@@ -1201,6 +1201,499 @@ export const dispatchIncident = async (req, res) => {
   }
 };
 
+
+
+// ...existing code...
+
+/**
+ * ==================== GROUP & CLUSTER INCIDENTS BY LOCATION ====================
+ * Groups incidents by TYPE and CLUSTERS similar incidents by proximity
+ * Supports dynamic radius: 10m, 20m, 50m, 100m, 500m, 1000m
+ * Shows which incidents are DUPLICATES (same incident, multiple reports)
+ */
+export const groupIncidentByLocationAndType = async (req, res) => {
+  try {
+    console.log("\n" + "=".repeat(80));
+    console.log("📍 GROUP INCIDENTS BY LOCATION AND TYPE WITH CLUSTERING");
+    console.log("=".repeat(80));
+
+    const { latitude, longitude, radius = 100, clusterRadius = 50 } = req.query;
+
+    // ==================== VALIDATION ====================
+    if (!latitude || !longitude) {
+      return res.status(400).json({
+        success: false,
+        message: "latitude and longitude are required query parameters",
+        code: "MISSING_COORDINATES",
+      });
+    }
+
+    const lat = parseFloat(latitude);
+    const lon = parseFloat(longitude);
+
+    if (isNaN(lat) || isNaN(lon)) {
+      return res.status(400).json({
+        success: false,
+        message: "latitude and longitude must be valid numbers",
+        code: "INVALID_COORDINATES",
+      });
+    }
+
+    if (lat < -90 || lat > 90) {
+      return res.status(400).json({
+        success: false,
+        message: "latitude must be between -90 and 90",
+        code: "INVALID_LATITUDE",
+      });
+    }
+
+    if (lon < -180 || lon > 180) {
+      return res.status(400).json({
+        success: false,
+        message: "longitude must be between -180 and 180",
+        code: "INVALID_LONGITUDE",
+      });
+    }
+
+    // Validate search radius
+    const validRadii = [10, 20, 50, 100, 500, 1000];
+    const searchRadiusMeters = Number(radius);
+
+    if (!validRadii.includes(searchRadiusMeters)) {
+      return res.status(400).json({
+        success: false,
+        message: `radius must be one of: ${validRadii.join(", ")} meters`,
+        code: "INVALID_RADIUS",
+        validRadii,
+      });
+    }
+
+    // Cluster radius should be <= search radius
+    let clusterRadiusMeters = Number(clusterRadius) || Math.min(50, searchRadiusMeters);
+    if (clusterRadiusMeters < 5 || clusterRadiusMeters > searchRadiusMeters) {
+      clusterRadiusMeters = Math.min(50, searchRadiusMeters);
+    }
+
+    console.log(`   📍 Location: (${lat.toFixed(4)}, ${lon.toFixed(4)})`);
+    console.log(`   📏 Search Radius: ${searchRadiusMeters}m`);
+    console.log(`   🔗 Cluster Radius (within same incident): ${clusterRadiusMeters}m`);
+
+    // ==================== GEOSPATIAL QUERY ====================
+    const earthRadiusMeters = 6378137;
+    const searchRadiusInRadians = searchRadiusMeters / earthRadiusMeters;
+
+    const query = {
+      location: {
+        $geoWithin: {
+          $centerSphere: [[lon, lat], searchRadiusInRadians],
+        },
+      },
+      status: { $ne: "Spam" },
+    };
+
+    const startTime = Date.now();
+
+    const incidents = await Incident.find(query)
+      .sort({ createdAt: -1 })
+      .populate("reportedBy", "name email phone role")
+      .populate("respondedBy", "name email phone role")
+      .populate("dispatchedResources", "name type status")
+      .select(
+        "_id type severity status description location trustScore priorityCode reportedBy respondedBy dispatchedResources createdAt mode"
+      )
+      .lean();
+
+    const queryTime = Date.now() - startTime;
+
+    console.log(`\n✅ Query completed in ${queryTime}ms`);
+    console.log(`   📊 Total incidents found: ${incidents.length}`);
+
+    // ==================== HELPER: CALCULATE DISTANCE BETWEEN TWO INCIDENTS ====================
+    const calculateDistanceBetweenIncidents = (incident1, incident2) => {
+      const R = 6371; // km
+      const lat1 = incident1.location.latitude;
+      const lon1 = incident1.location.longitude;
+      const lat2 = incident2.location.latitude;
+      const lon2 = incident2.location.longitude;
+
+      const dLat = ((lat2 - lat1) * Math.PI) / 180;
+      const dLon = ((lon2 - lon1) * Math.PI) / 180;
+      const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos((lat1 * Math.PI) / 180) *
+          Math.cos((lat2 * Math.PI) / 180) *
+          Math.sin(dLon / 2) *
+          Math.sin(dLon / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return Math.round(R * c * 1000); // meters
+    };
+
+    // ==================== CALCULATE DISTANCES FROM QUERY LOCATION ====================
+    const incidentsWithDistance = incidents.map((incident) => {
+      const incidentLon = incident.location.coordinates[0];
+      const incidentLat = incident.location.coordinates[1];
+
+      const R = 6371;
+      const dLat = ((incidentLat - lat) * Math.PI) / 180;
+      const dLon = ((incidentLon - lon) * Math.PI) / 180;
+      const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos((lat * Math.PI) / 180) *
+          Math.cos((incidentLat * Math.PI) / 180) *
+          Math.sin(dLon / 2) *
+          Math.sin(dLon / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      const distanceKm = R * c;
+      const distanceMeters = Math.round(distanceKm * 1000);
+
+      return {
+        _id: incident._id,
+        type: incident.type,
+        severity: incident.severity,
+        status: incident.status,
+        mode: incident.mode,
+        description: incident.description,
+        trustScore: incident.trustScore?.totalScore || 0,
+        priorityCode: incident.priorityCode?.code || "ALPHA",
+        dispatchLevel: incident.priorityCode?.dispatchLevel || 1,
+        reportedBy: incident.reportedBy,
+        respondedBy: incident.respondedBy,
+        dispatchedResources: incident.dispatchedResources,
+        location: {
+          latitude: incidentLat,
+          longitude: incidentLon,
+        },
+        distance: {
+          meters: distanceMeters,
+          kilometers: parseFloat(distanceKm.toFixed(3)),
+        },
+        createdAt: incident.createdAt,
+      };
+    });
+
+    // ==================== GROUP BY TYPE ====================
+    const groupedByType = {};
+
+    incidentsWithDistance.forEach((incident) => {
+      const type = incident.type || "Unknown";
+
+      if (!groupedByType[type]) {
+        groupedByType[type] = {
+          type,
+          totalCount: 0,
+          clusters: [],
+          rawIncidents: [],
+        };
+      }
+
+      groupedByType[type].totalCount += 1;
+      groupedByType[type].rawIncidents.push(incident);
+    });
+
+    // ==================== CLUSTER WITHIN EACH TYPE ====================
+    const groupedResults = Object.values(groupedByType).map((group) => {
+      const incidents = group.rawIncidents;
+      const clusters = [];
+      const assignedIncidents = new Set();
+
+      // DBSCAN-like clustering algorithm
+      incidents.forEach((incident, idx) => {
+        if (assignedIncidents.has(incident._id.toString())) {
+          return; // Already in a cluster
+        }
+
+        // Create new cluster
+        const cluster = {
+          clusterId: `${group.type}_cluster_${clusters.length + 1}`,
+          centerLocation: {
+            latitude: incident.location.latitude,
+            longitude: incident.location.longitude,
+          },
+          incidents: [incident],
+          count: 1,
+          isSingleReport: true,
+          isDuplicate: false,
+          statistics: {
+            bySeverity: {},
+            byStatus: {},
+            byMode: {},
+            trustScores: { min: 100, max: 0, average: 0 },
+            distanceMetrics: { min: 0, max: 0, average: 0 },
+          },
+        };
+
+        assignedIncidents.add(incident._id.toString());
+
+        // Find nearby incidents (within clusterRadius)
+        incidents.forEach((otherIncident, otherIdx) => {
+          if (
+            assignedIncidents.has(otherIncident._id.toString()) ||
+            idx === otherIdx
+          ) {
+            return;
+          }
+
+          const distMeters = calculateDistanceBetweenIncidents(
+            incident,
+            otherIncident
+          );
+
+          if (distMeters <= clusterRadiusMeters) {
+            cluster.incidents.push(otherIncident);
+            cluster.count += 1;
+            assignedIncidents.add(otherIncident._id.toString());
+          }
+        });
+
+        // Mark if duplicate reports
+        if (cluster.count > 1) {
+          cluster.isSingleReport = false;
+          cluster.isDuplicate = true;
+        }
+
+        // Calculate cluster statistics
+        let totalTrustScore = 0;
+        let totalDistance = 0;
+
+        cluster.incidents.forEach((inc, incIdx) => {
+          // Severity
+          cluster.statistics.bySeverity[inc.severity] =
+            (cluster.statistics.bySeverity[inc.severity] || 0) + 1;
+
+          // Status
+          cluster.statistics.byStatus[inc.status] =
+            (cluster.statistics.byStatus[inc.status] || 0) + 1;
+
+          // Mode
+          cluster.statistics.byMode[inc.mode] =
+            (cluster.statistics.byMode[inc.mode] || 0) + 1;
+
+          // Trust score
+          totalTrustScore += inc.trustScore;
+          cluster.statistics.trustScores.min = Math.min(
+            cluster.statistics.trustScores.min,
+            inc.trustScore
+          );
+          cluster.statistics.trustScores.max = Math.max(
+            cluster.statistics.trustScores.max,
+            inc.trustScore
+          );
+
+          // Distance from first incident in cluster
+          const distFromFirst = calculateDistanceBetweenIncidents(
+            cluster.incidents[0],
+            inc
+          );
+          if (incIdx === 0) {
+            cluster.statistics.distanceMetrics.min = 0;
+          } else {
+            cluster.statistics.distanceMetrics.min = Math.min(
+              cluster.statistics.distanceMetrics.min || Infinity,
+              distFromFirst
+            );
+          }
+          cluster.statistics.distanceMetrics.max = Math.max(
+            cluster.statistics.distanceMetrics.max,
+            distFromFirst
+          );
+          totalDistance += distFromFirst;
+        });
+
+        if (cluster.count > 0) {
+          cluster.statistics.trustScores.average = parseFloat(
+            (totalTrustScore / cluster.count).toFixed(2)
+          );
+          cluster.statistics.distanceMetrics.average = Math.round(
+            totalDistance / cluster.count
+          );
+        }
+
+        // Sort incidents within cluster by time (newest first)
+        cluster.incidents.sort(
+          (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
+        );
+
+        clusters.push(cluster);
+      });
+
+      // Sort clusters by: duplicates first, then by count
+      clusters.sort((a, b) => {
+        if (a.isDuplicate !== b.isDuplicate) {
+          return a.isDuplicate ? -1 : 1; // Duplicates first
+        }
+        return b.count - a.count; // Then by count
+      });
+
+      // ==================== GROUP STATISTICS ====================
+      const statistics = {
+        totalIncidents: incidents.length,
+        clusterCount: clusters.length,
+        duplicateClusters: clusters.filter((c) => c.isDuplicate).length,
+        singleReportClusters: clusters.filter((c) => c.isSingleReport).length,
+        bySeverity: { Critical: 0, High: 0, Medium: 0, Low: 0 },
+        byStatus: { Pending: 0, Active: 0, Resolved: 0 },
+        byMode: {},
+        trustScores: { min: 100, max: 0, average: 0 },
+        distanceMetrics: {
+          closest: Infinity,
+          farthest: 0,
+          average: 0,
+        },
+      };
+
+      let totalTrustScore = 0;
+      let totalDistance = 0;
+
+      incidents.forEach((incident) => {
+        statistics.bySeverity[incident.severity] =
+          (statistics.bySeverity[incident.severity] || 0) + 1;
+        statistics.byStatus[incident.status] =
+          (statistics.byStatus[incident.status] || 0) + 1;
+        statistics.byMode[incident.mode] =
+          (statistics.byMode[incident.mode] || 0) + 1;
+
+        totalTrustScore += incident.trustScore;
+        statistics.trustScores.min = Math.min(
+          statistics.trustScores.min,
+          incident.trustScore
+        );
+        statistics.trustScores.max = Math.max(
+          statistics.trustScores.max,
+          incident.trustScore
+        );
+
+        statistics.distanceMetrics.closest = Math.min(
+          statistics.distanceMetrics.closest,
+          incident.distance.meters
+        );
+        statistics.distanceMetrics.farthest = Math.max(
+          statistics.distanceMetrics.farthest,
+          incident.distance.meters
+        );
+        totalDistance += incident.distance.meters;
+      });
+
+      if (incidents.length > 0) {
+        statistics.trustScores.average = parseFloat(
+          (totalTrustScore / incidents.length).toFixed(2)
+        );
+        statistics.distanceMetrics.average = Math.round(
+          totalDistance / incidents.length
+        );
+      }
+
+      return {
+        type: group.type,
+        totalCount: group.totalCount,
+        clusters,
+        statistics,
+      };
+    });
+
+    // Sort groups by incident count
+    groupedResults.sort((a, b) => b.totalCount - a.totalCount);
+
+    // ==================== OVERALL STATISTICS ====================
+    const overallStatistics = {
+      searchRadius: searchRadiusMeters,
+      clusterRadius: clusterRadiusMeters,
+      totalIncidents: incidentsWithDistance.length,
+      totalTypeGroups: groupedResults.length,
+      totalClusters: groupedResults.reduce(
+        (sum, g) => sum + g.clusters.length,
+        0
+      ),
+      totalDuplicateClusters: groupedResults.reduce(
+        (sum, g) => sum + g.statistics.duplicateClusters,
+        0
+      ),
+      bySeverity: { Critical: 0, High: 0, Medium: 0, Low: 0 },
+      byStatus: { Pending: 0, Active: 0, Resolved: 0 },
+      byMode: {},
+      trustScores: { min: 100, max: 0, average: 0 },
+    };
+
+    let totalTrustScore = 0;
+
+    incidentsWithDistance.forEach((incident) => {
+      overallStatistics.bySeverity[incident.severity] =
+        (overallStatistics.bySeverity[incident.severity] || 0) + 1;
+      overallStatistics.byStatus[incident.status] =
+        (overallStatistics.byStatus[incident.status] || 0) + 1;
+      overallStatistics.byMode[incident.mode] =
+        (overallStatistics.byMode[incident.mode] || 0) + 1;
+
+      totalTrustScore += incident.trustScore;
+      overallStatistics.trustScores.min = Math.min(
+        overallStatistics.trustScores.min,
+        incident.trustScore
+      );
+      overallStatistics.trustScores.max = Math.max(
+        overallStatistics.trustScores.max,
+        incident.trustScore
+      );
+    });
+
+    if (incidentsWithDistance.length > 0) {
+      overallStatistics.trustScores.average = parseFloat(
+        (totalTrustScore / incidentsWithDistance.length).toFixed(2)
+      );
+    }
+
+    console.log(`\n📊 CLUSTERING RESULTS:`);
+    console.log(`   Total Type Groups: ${groupedResults.length}`);
+    console.log(
+      `   Total Clusters: ${overallStatistics.totalClusters} (${overallStatistics.totalDuplicateClusters} are duplicates)`
+    );
+    groupedResults.forEach((group) => {
+      console.log(
+        `   📍 ${group.type}: ${group.totalCount} incidents in ${group.clusters.length} clusters`
+      );
+      group.clusters.forEach((cluster) => {
+        const marker = cluster.isDuplicate ? "🔴 DUPLICATE" : "✅ UNIQUE";
+        console.log(
+          `      ${marker} Cluster ${cluster.clusterId}: ${cluster.count} reports within ${clusterRadiusMeters}m`
+        );
+      });
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        queryLocation: {
+          latitude: lat,
+          longitude: lon,
+          searchRadiusMeters,
+          clusterRadiusMeters,
+        },
+        groupedIncidents: groupedResults,
+        overallStatistics,
+        metadata: {
+          queryTime: `${queryTime}ms`,
+          timestamp: new Date().toISOString(),
+          note: "Incidents grouped by type, then clustered by proximity. Red clusters = duplicate reports of same incident. Green clusters = unique incidents.",
+        },
+      },
+    });
+  } catch (err) {
+    console.error("❌ groupIncidentByLocationAndType error:", err.message);
+    console.error(err.stack);
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error:
+        process.env.NODE_ENV === "development" ? err.message : "Server error",
+      code: "INTERNAL_SERVER_ERROR",
+    });
+  }
+};
+
+// ...existing code...
+
+
+
+
 export default {
   createIncident,
   getIncidents,
@@ -1213,4 +1706,5 @@ export default {
   getIncidentAnalytics,
   dispatchIncident,
   createIncidentDemo,
+  groupIncidentByLocationAndType
 };

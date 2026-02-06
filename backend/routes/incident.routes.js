@@ -11,7 +11,8 @@ import {
   getIncidentStats,
   getIncidentAnalytics,
   dispatchIncident,
-  createIncidentDemo
+  createIncidentDemo,
+  groupIncidentByLocationAndType,
 } from "../controller/incident.controller.js";
 import isAuth from "../middleware/auth.middleware.js";
 
@@ -44,7 +45,11 @@ IncidentRouter.patch("/:incidentId/status", isAuth, updateIncidentStatus);
 
 // Mark spam (protected)
 IncidentRouter.patch("/:incidentId/mark-spam", isAuth, markIncidentSpam);
-
+IncidentRouter.patch(
+  "/:incidentId/group-location-type",
+  isAuth,
+  groupIncidentByLocationAndType,
+);
 // Delete (protected)
 IncidentRouter.delete("/:incidentId", isAuth, deleteIncident);
 
