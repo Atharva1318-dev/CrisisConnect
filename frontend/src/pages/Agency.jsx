@@ -769,8 +769,13 @@ const Agency = () => {
                       Review and prioritize incoming incidents
                     </p>
                   </div>
-                  <div className="px-4 py-2 bg-blue-50 text-blue-700 rounded-full text-sm font-medium">
-                    {pendingIncidents.length} pending
+                  <div className="flex items-center gap-2">
+                    <div className="px-3 py-1.5 bg-yellow-50 text-yellow-700 rounded-full text-xs font-medium border border-yellow-200">
+                      {pendingIncidents.filter(i => i.status === "Pending").length} pending
+                    </div>
+                    <div className="px-3 py-1.5 bg-green-50 text-green-700 rounded-full text-xs font-medium border border-green-200">
+                      {pendingIncidents.filter(i => i.status === "Active").length} active
+                    </div>
                   </div>
                 </div>
               </div>
