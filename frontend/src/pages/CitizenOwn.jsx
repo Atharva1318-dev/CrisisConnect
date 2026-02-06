@@ -147,6 +147,18 @@ const CitizenOwn = () => {
     return R * c
   }
 
+  const calculateETA = (distanceKm) => {
+    if (distanceKm < 0.1) return 'Arrived'
+    // Average emergency vehicle speed: 45 km/h in urban areas
+    const avgSpeedKmh = 45
+    const timeHours = distanceKm / avgSpeedKmh
+    const timeMinutes = Math.ceil(timeHours * 60)
+
+    if (timeMinutes < 1) return '< 1 min'
+    if (timeMinutes === 1) return '1 min'
+    return `${timeMinutes} mins`
+  }
+
   const incidentCoords = trackingIncident?.location?.coordinates
   const incidentLatLng = incidentCoords?.length === 2
     ? [incidentCoords[1], incidentCoords[0]]
@@ -154,6 +166,30 @@ const CitizenOwn = () => {
   const mapCenter = deployedResources?.[0]?.location?.coordinates?.length === 2
     ? [deployedResources[0].location.coordinates[1], deployedResources[0].location.coordinates[0]]
     : incidentLatLng || [19.0760, 72.8777]
+
+  // Calculate closest unit ETA
+  const getClosestUnitETA = () => {
+    if (!incidentLatLng || deployedResources.length === 0) return null
+
+    let minDistance = Infinity
+    let closestUnit = null
+
+    deployedResources.forEach(res => {
+      const resLat = res.location?.coordinates?.[1]
+      const resLng = res.location?.coordinates?.[0]
+      if (resLat && resLng) {
+        const distance = calculateDistance(resLat, resLng, incidentLatLng[0], incidentLatLng[1])
+        if (distance < minDistance) {
+          minDistance = distance
+          closestUnit = { ...res, distance }
+        }
+      }
+    })
+
+    return closestUnit ? { unit: closestUnit, eta: calculateETA(minDistance), distance: minDistance } : null
+  }
+
+  const closestInfo = showTracking ? getClosestUnitETA() : null
 
   return (
     <div className="min-h-screen bg-zinc-50 pt-24 pb-12 px-6 font-sans">
@@ -301,17 +337,37 @@ const CitizenOwn = () => {
         {showTracking && trackingIncident && (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <div className="bg-white w-full max-w-4xl rounded-3xl shadow-2xl overflow-hidden">
-              <div className="p-4 border-b border-zinc-100 flex justify-between items-center bg-zinc-50">
-                <div>
-                  <h3 className="font-bold text-lg text-zinc-900 flex items-center gap-2">
-                    <Truck size={18} className="text-blue-600" />
-                    Track Help: Incident #{trackingIncident._id.slice(-4).toUpperCase()}
-                  </h3>
-                  <p className="text-xs text-zinc-500">Live location of deployed units</p>
+              <div className="p-4 border-b border-zinc-100 bg-zinc-50">
+                <div className="flex justify-between items-start mb-3">
+                  <div>
+                    <h3 className="font-bold text-lg text-zinc-900 flex items-center gap-2">
+                      <Truck size={18} className="text-blue-600" />
+                      Track Help: Incident #{trackingIncident._id.slice(-4).toUpperCase()}
+                    </h3>
+                    <p className="text-xs text-zinc-500">Live location of deployed units</p>
+                  </div>
+                  <button onClick={() => setShowTracking(false)} className="p-2 bg-white rounded-full hover:bg-zinc-100 transition-colors">
+                    <X size={18} className="text-zinc-500" />
+                  </button>
                 </div>
-                <button onClick={() => setShowTracking(false)} className="p-2 bg-white rounded-full hover:bg-zinc-100 transition-colors">
-                  <X size={18} className="text-zinc-500" />
-                </button>
+
+                {closestInfo && (
+                  <div className="bg-gradient-to-r from-blue-50 to-cyan-50 border border-blue-200 rounded-xl p-3 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 bg-blue-600 rounded-lg">
+                        <Clock size={18} className="text-white" />
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold text-blue-600 uppercase tracking-wide">Closest Unit ETA</p>
+                        <p className="text-lg font-bold text-blue-900">{closestInfo.eta}</p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs text-blue-600 font-medium">{closestInfo.unit.item_name}</p>
+                      <p className="text-xs text-blue-500">{closestInfo.distance.toFixed(2)} km away</p>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 p-4">
@@ -333,9 +389,11 @@ const CitizenOwn = () => {
                       if (!res.location?.coordinates?.length) return null
                       const resLat = res.location.coordinates[1]
                       const resLng = res.location.coordinates[0]
-                      const arrived = incidentLatLng
-                        ? calculateDistance(resLat, resLng, incidentLatLng[0], incidentLatLng[1]) < 0.1
-                        : false
+                      const distance = incidentLatLng
+                        ? calculateDistance(resLat, resLng, incidentLatLng[0], incidentLatLng[1])
+                        : null
+                      const arrived = distance !== null && distance < 0.1
+                      const eta = distance !== null ? calculateETA(distance) : null
 
                       return (
                         <Marker
@@ -347,6 +405,13 @@ const CitizenOwn = () => {
                             <div className="text-center">
                               <strong>{res.item_name}</strong><br />
                               Qty: {res.quantity}<br />
+                              {eta && (
+                                <>
+                                  <span className="text-blue-600 font-semibold text-sm">
+                                    ETA: {eta}
+                                  </span><br />
+                                </>
+                              )}
                               <span className={arrived ? 'text-green-600 font-bold' : 'text-blue-600 font-bold'}>
                                 {arrived ? 'ON SCENE' : 'En Route'}
                               </span>
@@ -374,13 +439,15 @@ const CitizenOwn = () => {
                       {deployedResources.map((res) => {
                         const resLat = res.location?.coordinates?.[1]
                         const resLng = res.location?.coordinates?.[0]
-                        const arrived = incidentLatLng && resLat && resLng
-                          ? calculateDistance(resLat, resLng, incidentLatLng[0], incidentLatLng[1]) < 0.1
-                          : false
+                        const distance = incidentLatLng && resLat && resLng
+                          ? calculateDistance(resLat, resLng, incidentLatLng[0], incidentLatLng[1])
+                          : null
+                        const arrived = distance !== null && distance < 0.1
+                        const eta = distance !== null ? calculateETA(distance) : null
 
                         return (
                           <div key={res._id} className="bg-white border border-zinc-200 rounded-xl p-3">
-                            <div className="flex items-center justify-between">
+                            <div className="flex items-center justify-between mb-2">
                               <div>
                                 <p className="font-bold text-zinc-900 text-sm">{res.item_name}</p>
                                 <p className="text-xs text-zinc-500">{res.category} • {res.quantity} units</p>
@@ -389,8 +456,22 @@ const CitizenOwn = () => {
                                 {arrived ? 'ON SCENE' : 'EN ROUTE'}
                               </span>
                             </div>
+
+                            {eta && !arrived && (
+                              <div className="flex items-center gap-2 bg-blue-50 border border-blue-100 rounded-lg px-2 py-1.5 mb-2">
+                                <Clock size={12} className="text-blue-600" />
+                                <div className="flex-1">
+                                  <p className="text-[10px] text-blue-600 font-semibold uppercase tracking-wide">ETA</p>
+                                  <p className="text-sm font-bold text-blue-900">{eta}</p>
+                                </div>
+                                <div className="text-right">
+                                  <p className="text-[10px] text-blue-500 font-medium">{distance.toFixed(2)} km</p>
+                                </div>
+                              </div>
+                            )}
+
                             {resLat && resLng && (
-                              <div className="text-[11px] text-zinc-400 font-mono mt-2">
+                              <div className="text-[11px] text-zinc-400 font-mono">
                                 {resLat.toFixed(4)}, {resLng.toFixed(4)}
                               </div>
                             )}

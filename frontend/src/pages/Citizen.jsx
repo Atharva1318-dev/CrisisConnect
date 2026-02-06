@@ -8,7 +8,7 @@ import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, Cart
 const Citizen = () => {
   const { userData } = useSelector(state => state.user)
   const { serverUrl } = useContext(AuthDataContext)
-  
+
   const [loading, setLoading] = useState(true)
   const [userIncidents, setUserIncidents] = useState([])
   const [stats, setStats] = useState(null)
@@ -96,7 +96,7 @@ const Citizen = () => {
       const date = new Date()
       date.setDate(date.getDate() - i)
       const dateStr = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-      const count = incidents.filter(inc => 
+      const count = incidents.filter(inc =>
         new Date(inc.createdAt).toLocaleDateString() === date.toLocaleDateString()
       ).length
       timelineData.push({ date: dateStr, incidents: count })
@@ -123,7 +123,7 @@ const Citizen = () => {
   return (
     <div className="min-h-screen bg-gray-50 pt-24 pb-12">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        
+
         {/* Header */}
         <div className="mb-12">
           <h1 className="text-4xl font-bold text-gray-900 mb-2">
@@ -134,7 +134,7 @@ const Citizen = () => {
 
         {/* KPI Cards */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-12">
-          
+
           {/* My Incidents Card */}
           <div className="bg-white rounded-2xl border border-gray-200 p-6 hover:shadow-lg transition">
             <div className="flex items-center justify-between">
@@ -182,35 +182,35 @@ const Citizen = () => {
           </div>
 
           {/* Avg Trust Score */}
-         <div className="bg-white rounded-2xl border border-gray-200 p-6 hover:shadow-lg transition">
-  <div className="flex items-center justify-between">
-    <div>
-      <p className="text-gray-600 text-sm font-medium mb-1">Avg Trust</p>
-      <p className="text-4xl font-bold text-purple-600">
-        {userIncidents.length > 0 
-          ? Math.round(
-              userIncidents.reduce((sum, i) => {
-                // ✅ Handle both number and object trustScore
-                const score = typeof i.trustScore === 'object' 
-                  ? i.trustScore.totalScore || 0 
-                  : i.trustScore || 0;
-                return sum + score;
-              }, 0) / userIncidents.length
-            )
-          : 0}%
-      </p>
-      <p className="text-xs text-gray-500 mt-2">Report credibility</p>
-    </div>
-    <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
-      <TrendingUp className="w-6 h-6 text-purple-600" />
-    </div>
-  </div>
-</div>
+          <div className="bg-white rounded-2xl border border-gray-200 p-6 hover:shadow-lg transition">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-gray-600 text-sm font-medium mb-1">Avg Trust</p>
+                <p className="text-4xl font-bold text-purple-600">
+                  {userIncidents.length > 0
+                    ? Math.round(
+                      userIncidents.reduce((sum, i) => {
+                        // ✅ Handle both number and object trustScore
+                        const score = typeof i.trustScore === 'object'
+                          ? i.trustScore.totalScore || 0
+                          : i.trustScore || 0;
+                        return sum + score;
+                      }, 0) / userIncidents.length
+                    )
+                    : 0}%
+                </p>
+                <p className="text-xs text-gray-500 mt-2">Report credibility</p>
+              </div>
+              <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
+                <TrendingUp className="w-6 h-6 text-purple-600" />
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Charts Section */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-12">
-          
+
           {/* Timeline Chart */}
           <div className="bg-white rounded-2xl border border-gray-200 p-6">
             <div className="flex items-center gap-2 mb-6">
@@ -318,30 +318,38 @@ const Citizen = () => {
                     <tr key={incident._id} className="border-b border-gray-100 hover:bg-gray-50 transition">
                       <td className="py-4 pl-0 font-medium text-gray-900">{incident.type}</td>
                       <td className="py-4">
-                        <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                          incident.severity === 'Critical' ? 'bg-red-100 text-red-700' :
+                        <span className={`px-3 py-1 rounded-full text-xs font-semibold ${incident.severity === 'Critical' ? 'bg-red-100 text-red-700' :
                           incident.severity === 'High' ? 'bg-orange-100 text-orange-700' :
-                          incident.severity === 'Medium' ? 'bg-yellow-100 text-yellow-700' :
-                          'bg-green-100 text-green-700'
-                        }`}>
+                            incident.severity === 'Medium' ? 'bg-yellow-100 text-yellow-700' :
+                              'bg-green-100 text-green-700'
+                          }`}>
                           {incident.severity}
                         </span>
                       </td>
                       <td className="py-4">
-                        <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                          incident.status === 'Active' ? 'bg-green-100 text-green-700' :
+                        <span className={`px-3 py-1 rounded-full text-xs font-semibold ${incident.status === 'Active' ? 'bg-green-100 text-green-700' :
                           incident.status === 'Pending' ? 'bg-yellow-100 text-yellow-700' :
-                          incident.status === 'Resolved' ? 'bg-blue-100 text-blue-700' :
-                          'bg-red-100 text-red-700'
-                        }`}>
+                            incident.status === 'Resolved' ? 'bg-blue-100 text-blue-700' :
+                              'bg-red-100 text-red-700'
+                          }`}>
                           {incident.status}
                         </span>
                       </td>
                       <td className="py-4 font-medium text-gray-900">
-  {typeof incident.trustScore === 'object' 
-    ? incident.trustScore.totalScore || 'N/A'
-    : incident.trustScore || 'N/A'}%
-</td>
+                        {typeof incident.trustScore === 'object'
+                          ? incident.trustScore.totalScore || 'N/A'
+                          : incident.trustScore || 'N/A'}%
+                      </td>
+                      <td className="p-4 rounded-r-xl text-zinc-500 text-sm">
+                        <div className="flex flex-col">
+                          <span className="font-bold text-zinc-700">
+                            {new Date(incident.createdAt).toLocaleDateString()}
+                          </span>
+                          <span className="text-xs">
+                            {new Date(incident.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </div>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -364,28 +372,36 @@ const Citizen = () => {
               <h2 className="text-xl font-bold text-gray-900">Nearby Incidents (10km radius)</h2>
             </div>
             <div className="space-y-3">
-              {nearbyIncidents.map(incident => (
-                <div key={incident._id} className="p-4 border border-gray-200 rounded-lg hover:border-blue-300 transition">
-                  <div className="flex items-start justify-between mb-2">
-                    <div>
-                      <p className="font-semibold text-gray-900">{incident.type}</p>
-                      <p className="text-sm text-gray-600">
-                        {Math.round(Math.random() * 10)} minutes ago
-                      </p>
+              {nearbyIncidents.map(incident => {
+                // Calculate actual time difference
+                const timeAgo = Math.floor((Date.now() - new Date(incident.createdAt)) / 60000)
+                const timeString = timeAgo < 1 ? 'Just now' :
+                  timeAgo < 60 ? `${timeAgo} min${timeAgo > 1 ? 's' : ''} ago` :
+                    timeAgo < 1440 ? `${Math.floor(timeAgo / 60)} hour${Math.floor(timeAgo / 60) > 1 ? 's' : ''} ago` :
+                      `${Math.floor(timeAgo / 1440)} day${Math.floor(timeAgo / 1440) > 1 ? 's' : ''} ago`
+
+                return (
+                  <div key={incident._id} className="p-4 border border-gray-200 rounded-lg hover:border-blue-300 transition">
+                    <div className="flex items-start justify-between mb-2">
+                      <div>
+                        <p className="font-semibold text-gray-900">{incident.type}</p>
+                        <p className="text-sm text-gray-600">
+                          {timeString}
+                        </p>
+                      </div>
+                      <span className={`px-3 py-1 rounded-full text-xs font-semibold ${incident.status === 'Active' ? 'bg-green-100 text-green-700' :
+                        incident.status === 'Pending' ? 'bg-yellow-100 text-yellow-700' :
+                          'bg-blue-100 text-blue-700'
+                        }`}>
+                        {incident.status}
+                      </span>
                     </div>
-                    <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                      incident.status === 'Active' ? 'bg-green-100 text-green-700' :
-                      incident.status === 'Pending' ? 'bg-yellow-100 text-yellow-700' :
-                      'bg-blue-100 text-blue-700'
-                    }`}>
-                      {incident.status}
-                    </span>
+                    <p className="text-sm text-gray-600 line-clamp-2">
+                      {incident.description || incident.translatedTranscript || 'No description'}
+                    </p>
                   </div>
-                  <p className="text-sm text-gray-600 line-clamp-2">
-                    {incident.description || incident.translatedTranscript || 'No description'}
-                  </p>
-                </div>
-              ))}
+                )
+              })}
             </div>
           </div>
         )}
