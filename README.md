@@ -6,7 +6,7 @@ A sophisticated platform for rapid disaster response that connects citizens, eme
 
 ## 🎬 Demo Video
 
-**[PLACEHOLDER: Link to demo video]**
+https://github.com/user-attachments/assets/714b7c08-76cd-4ba2-96f9-8f71569d0351
 
 _Demo shows: Incident reporting → AI verification → Dispatch → Real-time dashboards → Resolution_
 
