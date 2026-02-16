@@ -1,4 +1,4 @@
-# 🚨 Crisis Command Center
+# 🚨 CrisisConnect
 
 **AI-Powered Emergency Response Management Platform**
 
