@@ -506,9 +506,9 @@ const Agency = () => {
       const res = await axios.get(`${serverUrl}/api/incident/list?limit=100`, { withCredentials: true });
       const all = res.data.incidents || [];
 
-      // ✅ MODIFIED: SORT BY DATE DESCENDING (Newest First)
+      // ✅ MODIFIED: Include 'Spam' status in visibility so agency can review AI-flagged reports
       const visibleIncidents = all
-        .filter((i) => i.status === "Pending" || i.status === "Active")
+        .filter((i) => i.status === "Pending" || i.status === "Active" || i.status === "Spam")
         .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
       setAllIncidents(all);

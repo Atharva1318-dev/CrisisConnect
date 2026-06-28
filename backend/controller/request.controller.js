@@ -288,12 +288,9 @@ export const getAgencyRequests = async (req, res) => {
             .sort({ createdAt: -1 });
 
         // 🔍 FILTER LOGIC:
-        // Only show requests where the Incident is still "Pending" or "Active".
-        // If it is "Resolved" or "Spam", hide it from the Live Dashboard.
-        const liveRequests = requests.filter(req =>
-            req.incidentId &&
-            (req.incidentId.status === 'Pending' || req.incidentId.status === 'Active')
-        );
+        // We now show ALL requests from the agency so they can track history.
+        // We add a safety check to ensure incidentId exists before filtering.
+        const liveRequests = requests.filter(req => req.incidentId !== null);
 
         res.status(200).json({ requests: liveRequests });
     } catch (error) {

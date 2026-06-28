@@ -226,7 +226,7 @@ const detectWatermarksAndText = async (imageBuffer) => {
  */
 const detectAIWithGemma = async (imageBase64) => {
   try {
-    console.log("\n🔬 AI Detection (Gemma3:4b)...");
+    console.log("\n🔬 AI Detection (Gemma4:31b-cloud)...");
 
     const cleanBase64 = imageBase64.replace(
       /^data:image\/[a-zA-Z]+;base64,/,
@@ -268,7 +268,7 @@ Respond with ONLY this JSON:
     const response = await axios.post(
       "http://localhost:11434/api/generate",
       {
-        model: "gemma3:4b",
+        model: "gemma4:31b-cloud",
         prompt: forensicPrompt,
         images: [cleanBase64],
         stream: false,
@@ -449,7 +449,7 @@ export const analyzeForensics = async (
           watermarksFound: textAnalysis.foundWatermarks.length,
         },
         aiAnalysis: {
-          model: "gemma3:4b",
+          model: "gemma4:31b-cloud",
           confidence: aiAnalysis.confidence,
           aiIndicatorCount: aiAnalysis.aiIndicators.length,
           realIndicatorCount: aiAnalysis.realIndicators.length,

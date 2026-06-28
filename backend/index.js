@@ -8,17 +8,20 @@ import IncidentRouter from "./routes/incident.routes.js";
 import cookieParser from "cookie-parser";
 import NewsRouter from "./routes/new.routes.js";
 import ResourceRouter from "./routes/resource.routes.js";
-import { promises as dns } from 'dns';
 
+import WhatsAppRouter from "./routes/whatsapp.routes.js";
 import RequestRouter from "./routes/request.routes.js";
+import TelegramRouter from "./routes/telegram.routes.js";
+import { startBot } from "./controller/telegram.controller.js";
 
 dotenv.config();
 const app = express();
-const PORT = process.env.PORT || 5000
-dns.setServers(['8.8.8.8','8.8.4.4']);
+const PORT = process.env.PORT 
+
 ConnectDB();
 
 app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ limit: "50mb", extended: true }));
 app.use(cookieParser({ limit: "50mb", extended: true }));
 
 app.use(
@@ -35,15 +38,23 @@ app.use(
     allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
-
+app.get("/api/health", (req, res) => {
+  res.status(200).json({
+    status: "✅ WhatsApp SOS Service Running",
+    timestamp: new Date().toISOString(),
+    port: PORT,
+    uptime: process.uptime()
+  });
+});
 // ROUTES
 app.use("/api/auth", AuthRouter);
 app.use("/api/user", UserRouter);
 app.use("/api/news", NewsRouter);
 app.use("/api/incident", IncidentRouter);
 app.use("/api/resource", ResourceRouter);
-
+app.use("/api/whatsapp", WhatsAppRouter);
 app.use("/api/request", RequestRouter);
+app.use("/api/telegram", TelegramRouter);
 
 app.get("/", (req, res) => {
   res.send("API is running...");
@@ -51,4 +62,6 @@ app.get("/", (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
+  // Start Telegram Bot
+  startBot();
 });

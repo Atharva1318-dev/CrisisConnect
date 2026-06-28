@@ -23,6 +23,7 @@ import ContactUs from "./components/ContactUs.jsx";
 import CitizenOwn from "./pages/CitizenOwn.jsx";
 import ShakeSOS from "./components/ShakeSOS.jsx";
 import CoordinatorManage from './pages/CoordinatorManage.jsx';
+import WhatsappSOS from "./components/WhatsappSOS.jsx";
 const App = () => {
   const userData = useSelector((state) => state.user.userData);
   const navigate = useNavigate();
@@ -64,6 +65,7 @@ const App = () => {
               <Route path="/imagetext" element={<ImageTextInput />} />
               <Route path="/map" element={<Maps />} />
               <Route path="/citizenincidents" element={<CitizenOwn />} />
+              <Route path="/whatsapp-sos" element={<WhatsappSOS />} />
             </>
           )}
         {

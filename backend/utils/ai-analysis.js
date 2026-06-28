@@ -5,7 +5,7 @@ dotenv.config();
 
 const OLLAMA_URL = "http://localhost:11434/api/generate";
 const TEXT_MODEL = "qwen3-coder:480b-cloud";
-const VISION_MODEL = "gemma3:4b";
+const VISION_MODEL = "gemma4:31b-cloud";
 
 let ollamaConnectionCache = { status: null, timestamp: 0, cacheDuration: 30000 };
 
